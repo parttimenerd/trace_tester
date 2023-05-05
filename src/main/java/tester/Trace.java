@@ -1,7 +1,14 @@
 package tester;
 
+import tester.Frame.JavaFrame;
+import tester.util.Pair;
+import tester.util.Triple;
+
 import java.util.AbstractList;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public class Trace extends AbstractList<Frame> {
@@ -31,7 +38,7 @@ public class Trace extends AbstractList<Frame> {
     public Trace(int kind, List<Frame> frames) {
         this.kind = kind;
         this.frames = frames;
-        this.errorCode = frames.size();
+        this.errorCode = 0;
     }
 
     public Trace(int kind, int errorCode) {
@@ -50,7 +57,7 @@ public class Trace extends AbstractList<Frame> {
 
     @Override
     public Frame get(int index) {
-        return frames.get(index);
+        return index >= 0 ? frames.get(index) : frames.get(frames.size() + index);
     }
 
     @Override
@@ -65,10 +72,12 @@ public class Trace extends AbstractList<Frame> {
 
     @Override
     public String toString() {
-        return "Trace{" +
-                "frames=" + frames +
-                ", errorCode=" + errorCode +
-                '}';
+        if (hasError()) {
+            return "Trace{" +
+                    "errorCode=" + errorCode +
+                    '}';
+        }
+        return "Trace:" + frames.stream().map(f -> "\n" + f.toString()).collect(Collectors.joining(""));
     }
 
     @Override
@@ -121,11 +130,70 @@ public class Trace extends AbstractList<Frame> {
         return frames.equals(other.frames);
     }
 
-    public Frame lastFrame() {
-        return frames.get(frames.size() - 1);
+    public Frame topFrame() {
+        return get(0);
     }
 
-    public Frame firstFrame() {
-        return frames.get(0);
+    public Frame bottomFrame() {
+        return get(-1);
+    }
+
+    public void assertTrue(boolean val) {
+        if (!val) {
+            throw new AssertionError("Failed assertion for " + this);
+        }
+    }
+
+    /**
+     * 0 = top, -1 = bottom, -2 above bottom, ...
+     */
+    public void assertTrueForFrame(Predicate<Frame> predicate, int index) {
+        if (!predicate.test(get(index))) {
+            throw new AssertionError("Failed assertion for frame " + get(index) + " in " + this);
+        }
+    }
+
+    /**
+     * 0 = top, -1 = bottom, -2 above bottom, ...
+     */
+    public void assertTrueForJavaFrame(int index, Predicate<JavaFrame> predicate, String message) {
+        Frame frame = get(index);
+        String prefix = message.length() > 0 ? message + ": " : "";
+        if (frame.type != Frame.JAVA) {
+            throw new AssertionError(prefix + "Expected Java frame, got " + frame + " in " + this);
+        }
+        if (!predicate.test((JavaFrame) frame)) {
+            throw new AssertionError(prefix + "Failed assertion for frame " + get(index) + " in " + this);
+        }
+    }
+
+    @SafeVarargs
+    @SuppressWarnings("unchecked")
+    public final void assertTrue(Pair<Integer, Predicate<JavaFrame>>... pairs) {
+        List<String> errors = new ArrayList<>();
+        for (Pair<Integer, Predicate<JavaFrame>> pair : pairs) {
+            try {
+                String message = pair instanceof Triple ?
+                        ((Triple<Integer, Predicate<JavaFrame>, String>) pair).third + ": " : "";
+                if (pair.first >= size()) {
+                    throw new AssertionError("%sExpected at least %d frames, got %d".formatted(message, pair.first + 1,
+                            size()));
+                }
+                Frame frame = get(pair.first);
+                if (!(frame instanceof JavaFrame)) {
+                    throw new AssertionError("%sExpected Java frame %d, got %s".formatted(message, pair.first, frame));
+                }
+                if (!pair.second.test((JavaFrame) frame)) {
+                    throw new AssertionError("%sFailed assertion for frame %d %s".formatted(message, pair.first,
+                            frame));
+                }
+            } catch (AssertionError e) {
+                errors.add(e.getMessage());
+            }
+        }
+        if (!errors.isEmpty()) {
+            throw new AssertionError("%d out of %d checks failed:\n%s\nin %s"
+                    .formatted(errors.size(), pairs.length, String.join("\n", errors), this));
+        }
     }
 }

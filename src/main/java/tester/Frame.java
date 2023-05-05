@@ -1,5 +1,9 @@
 package tester;
 
+import tester.util.Triple;
+
+import java.util.function.Predicate;
+
 public abstract class Frame {
 
     public static final int JAVA = 1;
@@ -67,7 +71,9 @@ public abstract class Frame {
             this.methodId = methodId;
         }
 
-        /** ASGCT and GST Java frame*/
+        /**
+         * ASGCT and GST Java frame
+         */
         public JavaFrame(int bci, MethodId methodId) {
             super(ASGCT);
             this.compLevel = -1;
@@ -131,6 +137,28 @@ public abstract class Frame {
 
     public boolean hasMethod(String method) {
         return this instanceof JavaFrame && ((JavaFrame) this).methodId.methodName.equals(method);
+    }
+
+    /**
+     * @param signature method signature or method return type
+     */
+    public boolean hasMethod(String method, String signature) {
+        if (!hasMethod(method)) {
+            return false;
+        }
+        String sig = ((JavaFrame) this).methodId.signature;
+        if (sig.startsWith("(")) {
+            return sig.equals(signature);
+        }
+        return sig.endsWith(")" + signature);
+    }
+
+    public static Triple<Integer, Predicate<JavaFrame>, String> hasMethod(int index, String method) {
+        return Triple.of(index, frame -> frame.hasMethod(method), "Has method " + method);
+    }
+
+    public static Triple<Integer, Predicate<JavaFrame>, String> hasMethod(int index, String method, String signature) {
+        return Triple.of(index, frame -> frame.hasMethod(method, signature), "Has method " + method + " " + signature);
     }
 
     public boolean hasClassAndMethod(String clazz, String method) {

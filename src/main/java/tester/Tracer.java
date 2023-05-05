@@ -1,6 +1,9 @@
 package tester;
 
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.stream.IntStream;
 
 import static tester.Tracer.Options.*;
 
@@ -263,6 +266,10 @@ public class Tracer {
      */
     public static native Trace runASGCT(long threadId, int depth);
 
+    public Trace runASGST() {
+        return runASGST(Mode.ASGST.requiredOptions);
+    }
+
     public Trace runASGST(int options) {
         return runASGST(options, depth);
     }
@@ -272,12 +279,17 @@ public class Tracer {
      */
     public static native Trace runASGST(int options, int depth);
 
+    public Trace runASGSTInSignalHandler() {
+        return runASGSTInSignalHandler(Mode.ASGST_SIGNAL_HANDLER.requiredOptions);
+    }
+
     public Trace runASGSTInSignalHandler(int options) {
+        assert ((options & Mode.ASGST_SIGNAL_HANDLER.requiredOptions) == Mode.ASGST_SIGNAL_HANDLER.requiredOptions);
         return runASGSTInSignalHandler(options, null);
     }
 
     public Trace runASGSTInSignalHandler(int options, JavaThreadId threadId) {
-        return runASGSTInSignalHandler(options, getOSThreadId(threadId), depth);
+        return runASGSTInSignalHandler(options, -1, depth);
     }
 
     public Trace runASGSTInSignalHandler(int options, long threadId) {
@@ -289,14 +301,18 @@ public class Tracer {
      *
      * @param threadId thread id of the thread to walk or -1 for the current thread
      */
-    public static Trace runASGSTInSignalHandler(int options, long threadId, int depth) {return null;}
+    public static native Trace runASGSTInSignalHandler(int options, long threadId, int depth);
+
+    public Trace runASGSTInSeparateThread() {
+        return runASGSTInSeparateThread(Mode.ASGST_SEPARATE_THREAD.requiredOptions);
+    }
 
     public Trace runASGSTInSeparateThread(int options) {
         return runASGSTInSeparateThread(options, -1);
     }
 
     public Trace runASGSTInSeparateThread(int options, JavaThreadId threadId) {
-        return runASGSTInSeparateThread(options, getOSThreadId(threadId));
+        return runASGSTInSeparateThread(options, -1);
     }
 
     public Trace runASGSTInSeparateThread(int options, long threadId) {
@@ -306,9 +322,7 @@ public class Tracer {
     /**
      * walk the current stack using ASGST in a separate thread
      */
-    public Trace runASGSTInSeparateThread(int options, long threadId, int depth) {
-        return null;
-    }
+    public static native Trace runASGSTInSeparateThread(int options, long threadId, int depth);
 
     /**
      * walk the current stack using the given config
@@ -347,7 +361,7 @@ public class Tracer {
         }
 
         public void checkEquality(ConfiguredTrace other) {
-            if (trace.equals(other.trace, config.doesIncludeCFrames() && other.config.doesIncludeCFrames())) {
+            if (!trace.equals(other.trace, !config.doesIncludeCFrames() || !other.config.doesIncludeCFrames())) {
                 throw new TracesUnequalError(this, other);
             }
         }
@@ -368,7 +382,19 @@ public class Tracer {
 
         @Override
         public String toString() {
-            return "Traces unequal:\n" + a + "\n" + b;
+            boolean ignoreNonJavaFrames = !a.trace.hasNonJavaFrames() || !b.trace.hasNonJavaFrames();
+            Trace af = ignoreNonJavaFrames ? a.trace.withoutNonJavaFrames() : a.trace;
+            Trace bf = ignoreNonJavaFrames ? b.trace.withoutNonJavaFrames() : b.trace;
+            List<Integer> unequalIndexes = IntStream.range(0, Math.max(af.size(), bf.size()))
+                    .filter(i -> i >= af.size() || i >= bf.size() || !af.get(i).equals(bf.get(i)))
+                    .boxed()
+                    .toList();
+            List<String> lines = new ArrayList<>();
+            unequalIndexes.forEach(i -> {
+                lines.add("at %d: %s != %s\n".formatted(i, i >= af.size() ? "null" : af.get(i), i >= bf.size() ?
+                        "null" : bf.get(i)));
+            });
+            return "Traces unequal (%s vs %s):\n".formatted(a.config, b.config) + String.join("", lines) + a + "\n" + b;
         }
     }
 
@@ -380,10 +406,14 @@ public class Tracer {
      */
     private Trace runAndCompare(List<Configuration> configs, int depth) {
         assert configs != null && configs.size() > 0;
-        return configs.stream().map(config -> new ConfiguredTrace(config, run(config, depth))).reduce((a, b) -> {
-            a.checkEquality(b);
-            return a.trace.size() > b.trace.size() ? a : b;
-        }).get().trace;
+        var confTraces = configs.stream().map(config -> new ConfiguredTrace(config, run(config, depth))).toList();
+        var first = confTraces.stream().max(Comparator.comparingInt(a -> a.trace.size())).orElseThrow();
+        for (var other : confTraces) {
+            if (other != first) {
+                first.checkEquality(other);
+            }
+        }
+        return first.trace;
     }
 
     public record JavaThreadId(long id) {
@@ -398,9 +428,7 @@ public class Tracer {
     }
 
     private static native long getOSThreadId(long javaThreadId);
+
     public static native long getCurrentOSThreadId();
 
-    public static JavaThreadId getCurrentJavaThreadId() {
-        return new JavaThreadId((int) Thread.currentThread().getId());
-    }
 }

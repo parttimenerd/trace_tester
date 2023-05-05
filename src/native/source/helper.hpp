@@ -147,20 +147,20 @@ bool doesFrameBelongToJavaMethod(ASGST_CallFrame frame, uint8_t type, const char
   return true;
 }
 
-bool isStubFrame(ASGST_CallFrame frame, const char* msg_prefix) {
-  if (frame.type != ASGST_FRAME_STUB) {
-    fprintf(stderr, "%s: Expected STUB frame, got %d", msg_prefix, frame.type);
-    return false;
-  }
-  return true;
-}
-
 bool isCppFrame(ASGST_CallFrame frame, const char* msg_prefix) {
   if (frame.type != ASGST_FRAME_CPP) {
     fprintf(stderr, "%s: Expected CPP frame, got %d", msg_prefix, frame.type);
     return false;
   }
   return true;
+}
+
+bool isTracerMethod(jmethodID method) {
+  jclass klass;
+  JvmtiDeallocator<char*> className;
+  ensureSuccess(jvmti->GetMethodDeclaringClass(method, &klass), "get declaring class");
+  ensureSuccess(jvmti->GetClassSignature(klass, className.get_addr(), nullptr), "get class signature");
+  return strcmp(className.get(), "Ltester/Tracer;") == 0;
 }
 
 void printMethod(FILE* stream, jmethodID method) {
@@ -226,8 +226,6 @@ template <size_t N = 0> const char* lookForMethod(void* pc, std::array<std::pair
 template <size_t N = 0> void printNonJavaFrame(FILE* stream, ASGST_NonJavaFrame frame, std::array<std::pair<const char*, void*>, N> methods = {}) {
   if (frame.type == ASGST_FRAME_CPP) {
     fprintf(stream, "CPP frame, pc = %p", frame.pc);
-  } else if (frame.type == ASGST_FRAME_STUB) {
-    fprintf(stream, "Stub frame, pc = %p", frame.pc);
   } else {
     fprintf(stream, "Unknown frame type: %d", frame.type);
   }
@@ -254,7 +252,6 @@ template <size_t N = 0> void printFrame(FILE* stream, ASGST_CallFrame frame, std
       printJavaFrame(stream, frame.java_frame);
       break;
     case ASGST_FRAME_CPP:
-    case ASGST_FRAME_STUB:
       printNonJavaFrame(stream, frame.non_java_frame, methods);
       break;
     default:
@@ -523,7 +520,23 @@ jmethodID findMethod(JNIEnv *env, jmethodID &cache, jclass clazz, const char *na
     fprintf(stderr, "Error: cache method %s\n", name);
     cache = env->GetMethodID(clazz, name, signature);
     if (cache == nullptr) {
-      fprintf(stderr, "Error: could not find method %s\n", name);
+      // get name of class clazz
+      JvmtiDeallocator<char*> className;
+      jvmtiError err = jvmti->GetClassSignature(clazz, className.get_addr(), nullptr);
+
+      fprintf(stderr, "Error: could not find method %s %s in class %s\n", name, signature, className.get());
+      // get methods of class clazz
+      jint methodCount;
+      JvmtiDeallocator<jmethodID*> methods;
+      ensureSuccess(jvmti->GetClassMethods(clazz, &methodCount, methods.get_addr()), "Could not get methods of class");
+      fprintf(stderr, "did you mean\n", className.get());
+      for (int i = 0; i < methodCount; i++) {
+        char *methodName;
+        char *methodSignature;
+        char *methodGenericSignature;
+        ensureSuccess(jvmti->GetMethodName(methods.get()[i], &methodName, &methodSignature, &methodGenericSignature), "Could not get method name");
+        fprintf(stderr, "  %s %s %s\n", methodName, methodSignature, methodGenericSignature);
+      }
       exit(1);
     }
   }

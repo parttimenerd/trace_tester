@@ -51,6 +51,8 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <mutex>
+#include <condition_variable>
 
 #ifndef _XOPEN_SOURCE
 #define _XOPEN_SOURCE 600
@@ -73,6 +75,8 @@ static JavaVM *jvm;
 
 static ThreadIdMap threadIdMap;
 
+std::mutex _asgst_sep_m;
+std::condition_variable _asgst_sep_cv;
 
 struct ThreadState {
   pthread_t thread;
@@ -120,6 +124,7 @@ void printAGInfoIfNeeded();
 
 void onAbort() {
   shouldStop = true;
+  _asgst_sep_cv.notify_all();
   if (samplerThread.joinable()) {
     samplerThread.join();
   }
@@ -149,8 +154,7 @@ static void JNICALL OnClassPrepare(jvmtiEnv *jvmti, JNIEnv *jni_env,
 
 static void startSamplerThread();
 
-static void JNICALL OnVMInit(jvmtiEnv *_jvmti, JNIEnv *jni_env, jthread thread) {
-  jvmti = _jvmti;
+void primeClasses() {
   jint class_count = 0;
 
   // Get any previously loaded classes that won't have gone through the
@@ -170,12 +174,12 @@ static void JNICALL OnVMInit(jvmtiEnv *_jvmti, JNIEnv *jni_env, jthread thread) 
     GetJMethodIDs(classList[i]);
   }
 
-  startSamplerThread();
 }
 
-static void signalHandler(int signum, siginfo_t *info, void *ucontext) {
-
+static void JNICALL OnVMInit(jvmtiEnv *_jvmti, JNIEnv *jni_env, jthread thread) {
 }
+
+static void signalHandler(int signum, siginfo_t *info, void *ucontext);
 
 static void startSamplerThread() {
   samplerThread = std::thread(loop);
@@ -235,6 +239,8 @@ static jint Agent_Initialize(JavaVM *_jvm, char *options, void *reserved) {
                     JVMTI_ENABLE, JVMTI_EVENT_THREAD_END, nullptr),
                 "thread end");
   initASGCT();
+  startSamplerThread();
+  primeClasses();
   return JNI_OK;
 }
 
@@ -283,10 +289,6 @@ bool checkJThread(jthread javaThread) {
   return true;
 }
 
-void loop() {
-  while (!shouldStop) {}
-}
-
 /*
  * Class:     tester_Tracer
  * Method:    runGST
@@ -296,18 +298,16 @@ JNIEXPORT jobject JNICALL Java_tester_Tracer_runGST
   (JNIEnv *env, jclass, jlong threadId, jint depth) {
     // TODO: don't ignore thread
   jthread thread;
-  fprintf(stderr, "h jvmti %p\n", jvmti);
   jvmti->GetCurrentThread(&thread);
   jvmtiFrameInfo gstFrames[MAX_DEPTH];
   jint gstCount = 0;
-  fprintf(stderr, "Getting stack trace for thread %ld\n", threadId);
   jvmtiError err = jvmti->GetStackTrace(thread, 0, depth, gstFrames, &gstCount);
-  fprintf(stderr, "Got stack trace for thread %ld err %d\n", threadId, err);
   if (err != JVMTI_ERROR_NONE) {
     fprintf(stderr, "Error: GetStackTrace failed with error %d\n", err);
     return nullptr;
   }
-  return createTrace(env, (jvmtiFrameInfo*)gstFrames, gstCount);
+  int app = countFirstTracerFrames(gstFrames, gstCount);
+  return createTrace(env, (jvmtiFrameInfo*)gstFrames + app, gstCount - app);
 }
 
 /*
@@ -326,6 +326,9 @@ JNIEXPORT jobject JNICALL Java_tester_Tracer_runASGCT
   ucontext_t context;
   getcontext(&context);
   asgct(&trace, depth, &context);
+  int app = countFirstTracerFrames(&trace);
+  trace.num_frames -= app;
+  trace.frames += app;
   return createTrace(env, &trace);
 }
 
@@ -342,9 +345,135 @@ JNIEXPORT jobject JNICALL Java_tester_Tracer_runASGST
   ucontext_t context;
   getcontext(&context);
   AsyncGetStackTrace(&trace, depth, &context, options);
+  int app = countFirstTracerFrames(&trace);
+  trace.num_frames -= app;
+  trace.frames += app;
   return createTrace(env, &trace);
 }
 
+long nanotime() {
+  struct timespec ts;
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  return ts.tv_sec * 1000000000 + ts.tv_nsec;
+}
+
+/** waits as long as condition holds with a timeout, returns false if timeout is hit*/
+bool waitWhile(std::function<bool()> condition, long timeout_ns = -1) {
+    long start = nanotime();
+    while (condition()) {
+        long diff = nanotime() - start;
+        if (timeout_ns != -1 && diff > timeout_ns) {
+            return false;
+        }
+    }
+    return true;
+}
+
+enum class WalkMode { sameThread, separateThread };
+
+struct WalkSettings {
+  WalkMode mode;
+  jint depth;
+  jint options;
+  pthread_t thread;
+};
+
+std::atomic<WalkSettings*> _walkSettings;
+std::atomic<void*> _ucontext;
+ASGST_CallFrame _frames[MAX_DEPTH];
+ASGST_CallTrace _trace;
+std::atomic<bool> _finished;
+
+// see https://mostlynerdless.de/blog/2023/04/21/couldnt-we-just-use-asyncgetcalltrace-in-a-separate-thread/ for more explanations
+static void signalHandler(int signum, siginfo_t *info, void *ucontext) {
+  void* expected = nullptr;
+  if (!_ucontext.compare_exchange_strong(expected, ucontext) || _walkSettings == nullptr) {
+      // another signal handler invocation is already in progress
+      return;
+  }
+  WalkSettings settings = *_walkSettings.load();
+  if (settings.mode == WalkMode::sameThread) {
+    AsyncGetStackTrace(&_trace, settings.depth, (ucontext_t*)ucontext, settings.options);
+    _ucontext = nullptr;
+    _finished = true;
+  } else {
+    // wait for the stack to be walked, and block the thread from executing
+    // we do not timeout here, as this leads to difficult bugs
+    waitWhile([&](){ return _ucontext != nullptr;});
+  }
+}
+
+void loop() {
+  JNIEnv *env;
+  jvm->AttachCurrentThreadAsDaemon((void**)&env, nullptr);
+  while (!shouldStop) {
+    std::unique_lock<std::mutex> lk(_asgst_sep_m);
+    _asgst_sep_cv.wait(lk);
+    if (shouldStop) {
+      return;
+    }
+    WalkSettings settings = *_walkSettings.load();
+    sendSignal(settings.thread);
+    // wait for the stack to be walked, and block the thread from executing
+    // we do not timeout here, as this leads to difficult bugs
+    waitWhile([&](){ return _ucontext == nullptr;});
+    AsyncGetStackTrace(&_trace, settings.depth, (void*)_ucontext.load(), ASGST_INCLUDE_C_FRAMES);
+    _ucontext = nullptr;
+    _finished = true;
+    lk.unlock();
+    _asgst_sep_cv.notify_all();
+  }
+  jvm->DetachCurrentThread();
+}
+
+ASGST_CallTrace* runASGST(WalkSettings settings) {
+  _trace.frames = _frames;
+  _walkSettings = &settings;
+  _finished = false;
+  _ucontext = nullptr;
+  if (settings.mode == WalkMode::sameThread) {
+    if (!sendSignal(settings.thread)) {
+      return nullptr;
+    }
+    waitWhile([&](){ return _finished == false;});
+  } else if (settings.mode == WalkMode::separateThread) {
+    _asgst_sep_cv.notify_one();
+    std::unique_lock<std::mutex> lk{_asgst_sep_m};
+    _asgst_sep_cv.wait(lk, [&](){ return _finished == true;});
+  } else {
+    throw std::runtime_error("unknown walk mode");
+  }
+  return &_trace;
+}
+
+/*
+ * Class:     tester_Tracer
+ * Method:    runASGSTInSignalHandler
+ * Signature: (IJI)Ltester/Trace;
+ */
+JNIEXPORT jobject JNICALL Java_tester_Tracer_runASGSTInSignalHandler
+  (JNIEnv *env, jclass, jint options, jlong, jint depth) {
+  ASGST_CallTrace* trace = runASGST({WalkMode::sameThread, depth, options, pthread_self()});
+  int app = countFirstTracerFrames(trace);
+  trace->num_frames -= app;
+  trace->frames += app;
+  return createTrace(env, trace);
+}
+
+/*
+ * Class:     tester_Tracer
+ * Method:    runASGSTInSeparateThread
+ * Signature: (IJI)Ltester/Trace;
+ */
+JNIEXPORT jobject JNICALL Java_tester_Tracer_runASGSTInSeparateThread
+  (JNIEnv *env, jclass, jint options, jlong, jint depth) {
+  ASGST_CallTrace* trace = runASGST({WalkMode::separateThread, depth, options, pthread_self()});
+  int app = countFirstTracerFrames(trace);
+  trace->num_frames -= app;
+  trace->frames += app;
+  auto t = createTrace(env, trace);
+  return t;
+}
 
 static jclass arrayListClass = nullptr;
 static jmethodID arrayListConstructor = nullptr;

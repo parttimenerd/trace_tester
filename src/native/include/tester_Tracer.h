@@ -33,6 +33,22 @@ JNIEXPORT jobject JNICALL Java_tester_Tracer_runASGST
 
 /*
  * Class:     tester_Tracer
+ * Method:    runASGSTInSignalHandler
+ * Signature: (IJI)Ltester/Trace;
+ */
+JNIEXPORT jobject JNICALL Java_tester_Tracer_runASGSTInSignalHandler
+  (JNIEnv *, jclass, jint, jlong, jint);
+
+/*
+ * Class:     tester_Tracer
+ * Method:    runASGSTInSeparateThread
+ * Signature: (IJI)Ltester/Trace;
+ */
+JNIEXPORT jobject JNICALL Java_tester_Tracer_runASGSTInSeparateThread
+  (JNIEnv *, jclass, jint, jlong, jint);
+
+/*
+ * Class:     tester_Tracer
  * Method:    getJavaThreadIds
  * Signature: ()Ljava/util/List;
  */
