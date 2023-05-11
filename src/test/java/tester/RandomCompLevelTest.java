@@ -23,6 +23,14 @@ import static org.testng.AssertJUnit.assertFalse;
  * Set the compilation level randomly for all methods and asserts that the profiling still works and returns the correct
  * compilation level. The same is done for the inlining.
  * <p>
+ * It creates traces where the following holds, assuming that method n is the callee of method n+1:
+ * <li>
+ *     <ul>method n is only inlined if method n+1 is inlined or compiled</ul>
+ *     <ul>method n has the same compilation level as method n+1 if method n+1 is inlined or compiled</ul>
+ *     <ul>method n_max is not inlined</ul>
+ *     <ul>every method n (schema methodN) except method n_max, calls method n-1 and nothing else</ul>
+ * </li>
+ * <p>
  * This test checks for API correctness with
  */
 public class RandomCompLevelTest {
@@ -31,7 +39,7 @@ public class RandomCompLevelTest {
         JNIHelper.loadAndAttachIfNeeded();
     }
 
-    private final int RUNS = 1;
+    private final int RUNS = 10;
 
     private static int parseMethodNameToInt(String name) {
         return Integer.parseInt(name.replaceAll("[A-Za-z]+", ""));
@@ -101,7 +109,7 @@ public class RandomCompLevelTest {
     }
 
     public static void main(String[] args) {
-        new RandomCompLevelTest().testWithoutInlining();
+        new RandomCompLevelTest().testWithInlining();
     }
 
     private int method1() {

@@ -1,6 +1,7 @@
 package tester;
 
 import tester.util.Triple;
+import tester.util.WhiteBoxUtil.CompilationLevelAndInlining;
 
 import java.lang.reflect.Executable;
 import java.util.Arrays;
@@ -200,6 +201,10 @@ public abstract class Frame {
         public Matcher isNotInlined() {
             return new Matcher(getFirst(), getSecond().and(frame -> frame.type != JAVA_INLINED), getThird() + " and " +
                     "is not inlined");
+        }
+
+        public Matcher has(CompilationLevelAndInlining compilationLevelAndInlining) {
+            return hasCompilationLevel(compilationLevelAndInlining.level()).isInlined(compilationLevelAndInlining.inline());
         }
 
         public static Matcher of(int index, Predicate<JavaFrame> predicate, String description) {

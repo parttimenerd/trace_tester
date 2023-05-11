@@ -5,10 +5,7 @@ import tester.Frame;
 import tester.Frame.JavaFrame;
 
 import java.lang.reflect.Executable;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Random;
+import java.util.*;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -37,12 +34,27 @@ public class WhiteBoxUtil {
     }
 
     public record CompilationLevelAndInlining(int level, boolean inline) {
+
+        public static CompilationLevelAndInlining of(int level, boolean inline) {
+            return new CompilationLevelAndInlining(level, inline);
+        }
+
+        public static CompilationLevelAndInlining INTERPRETED = of(CompilationLevel.COMP_LEVEL_NONE, false);
+
+        public static CompilationLevelAndInlining COMPILED_NOT_INLINED = of(CompilationLevel.COMP_LEVEL_MAX, false);
+
+        public static CompilationLevelAndInlining COMPILED_INLINED = of(CompilationLevel.COMP_LEVEL_MAX, true);
+    }
+
+    public static void reset(Collection<Executable> methods) {
+        WhiteBox wb = WhiteBox.getWhiteBox();
+        methods.forEach(wb::deoptimizeMethod);
+        methods.forEach(wb::clearMethodState); // required for a reset
     }
 
     public static void forceCompilationLevels(Map<Executable, CompilationLevelAndInlining> levels) {
         WhiteBox wb = WhiteBox.getWhiteBox();
-        levels.keySet().forEach(wb::deoptimizeMethod);
-        levels.keySet().forEach(wb::clearMethodState); // required for a reset
+        reset(levels.keySet());
         List<Executable> inlinedMethods = new ArrayList<>();
         List<Executable> notInlinedMethods = new ArrayList<>();
         levels.forEach((m, level) -> {
