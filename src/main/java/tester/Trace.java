@@ -196,4 +196,24 @@ public class Trace extends AbstractList<Frame> {
                     .formatted(errors.size(), pairs.length, String.join("\n", errors), this));
         }
     }
+
+    /**
+     * returns a copy of this trace with only the top chain of methods all matching the passed regular expression
+     */
+    public Trace withOnlyTopMatching(String methodRegexp) {
+        if (hasError()) {
+            return this;
+        }
+        List<Frame> newFrames = new ArrayList<>();
+        for (Frame frame : frames) {
+            if (frame instanceof JavaFrame javaFrame) {
+                if (javaFrame.methodId.methodName.matches(methodRegexp)) {
+                    newFrames.add(frame);
+                } else {
+                    break;
+                }
+            }
+        }
+        return new Trace(kind, newFrames);
+    }
 }

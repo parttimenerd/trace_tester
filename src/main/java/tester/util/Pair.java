@@ -1,5 +1,9 @@
 package tester.util;
 
+import java.util.Map;
+import java.util.stream.Collector;
+import java.util.stream.Collectors;
+
 public class Pair<S, T> {
 
     public final S first;
@@ -46,5 +50,9 @@ public class Pair<S, T> {
 
     public T getSecond() {
         return second;
+    }
+
+    public static <S, T> Collector<Pair<S, T>, ?, Map<S, T>> toMap() {
+        return Collectors.toMap(Pair::getFirst, Pair::getSecond);
     }
 }

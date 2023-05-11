@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.stream.IntStream;
 
 import static tester.Tracer.Options.*;
+import static tester.util.ListUtils.combine;
 
 /**
  * obtain traces with multiple configurations
@@ -169,18 +170,38 @@ public class Tracer {
     );
 
     /**
-     * extensive set of modes
+     * Full list of ASGST related configurations
      */
-    public static final List<Configuration> extensiveConfigs = List.of(
-            Configuration.asgct(),
+    public static final List<Configuration> extensiveASGSTConfigs = List.of(
             Configuration.asgst(),
-            Configuration.asgct().includeNonJavaThreads().includeWalkDuringUnsafeStates(),
-            Configuration.asgct().includeCFrames(),
+            Configuration.asgst().includeNonJavaThreads().includeWalkDuringUnsafeStates(),
+            Configuration.asgst().includeCFrames(),
             Configuration.asgstSignalHandler(),
+            Configuration.asgstSignalHandler().includeNonJavaThreads().includeWalkDuringUnsafeStates(),
+            Configuration.asgstSignalHandler().includeCFrames(),
             Configuration.asgstSignalHandler().includeNonJavaThreads().includeCFrames().includeWalkDuringUnsafeStates(),
-            Configuration.asgstSeparateThread(),
+            Configuration.asgstSeparateThread().includeNonJavaThreads().includeWalkDuringUnsafeStates(),
+            Configuration.asgstSeparateThread().includeCFrames(),
             Configuration.asgstSeparateThread().includeNonJavaThreads().includeCFrames().includeWalkDuringUnsafeStates()
     );
+
+    /**
+     * Basic list of ASGST related configurations which include C frames
+     */
+    public static final List<Configuration> asgstCFrameConfigs = List.of(
+            Configuration.asgst().includeCFrames(),
+            Configuration.asgstSignalHandler().includeCFrames(),
+            Configuration.asgstSeparateThread().includeCFrames()
+    );
+
+
+    /**
+     * All modes available
+     */
+    public static final List<Configuration> extensiveConfigs = combine(List.of(
+            Configuration.gst(),
+            Configuration.asgct()
+    ), extensiveASGSTConfigs);
 
     public static final List<Configuration> basicJavaConfigs = List.of(
             Configuration.gst(),

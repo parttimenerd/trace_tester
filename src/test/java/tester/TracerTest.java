@@ -1,11 +1,17 @@
 package tester;
 
+import jdk.test.whitebox.WhiteBox;
 import org.testng.annotations.Test;
+import tester.util.CompilationLevel;
+import tester.util.WhiteBoxUtil;
 
+import static org.testng.AssertJUnit.assertEquals;
 import static org.testng.AssertJUnit.assertTrue;
 
 /**
- * Basic tests
+ * Basic tests that run the different APIs in their different modes on simple methods.
+ * <p>
+ * Inspired by <a href="https://bugs.openjdk.org/browse/JDK-8302320">a bug</a>.
  */
 public class TracerTest {
 
@@ -21,7 +27,6 @@ public class TracerTest {
     }
 
     private int innerGST2() {
-
         new Tracer().runGST().assertTrue(Frame.hasMethod(0, "innerGST2", "()I"), Frame.hasMethod(1, "testRunGST2"));
         return 0;
     }
@@ -109,8 +114,36 @@ public class TracerTest {
         new Tracer().runAndCompare().assertTrue(Frame.hasMethod(0, "testRunAndCompare", "()V"));
     }
 
-    public static void main(String[] args) {
+    /**
+     * First WhiteBox related test, that checks a compiled method is shown as compiled
+     */
+    @Test
+    public void testBasicWhiteBoxCompileTest() throws NoSuchMethodException {
+        var m = TracerTest.class.getDeclaredMethod("innerBasicWhiteBoxCompileTest");
+        var wb = WhiteBox.getWhiteBox();
+        innerBasicWhiteBoxCompileTestCompLevel = wb.getMethodCompilationLevel(m);
+        innerBasicWhiteBoxCompileTest();
+        WhiteBoxUtil.forceCompilationLevel(m, CompilationLevel.COMP_LEVEL_MAX);
+        innerBasicWhiteBoxCompileTestCompLevel = wb.getMethodCompilationLevel(m);
+        assertEquals(CompilationLevel.COMP_LEVEL_MAX, innerBasicWhiteBoxCompileTestCompLevel);
+        innerBasicWhiteBoxCompileTest();
+        wb.deoptimizeMethod(m);
+        innerBasicWhiteBoxCompileTestCompLevel = wb.getMethodCompilationLevel(m);
+        assertEquals(CompilationLevel.COMP_LEVEL_NONE, innerBasicWhiteBoxCompileTestCompLevel);
+        innerBasicWhiteBoxCompileTest();
+    }
+
+    private int innerBasicWhiteBoxCompileTestCompLevel = 0;
+
+    private boolean innerBasicWhiteBoxCompileTest() throws NoSuchMethodException {
+        new Tracer().runAndCompare().assertTrue(Frame.matchesExecutable(0, TracerTest.class.getDeclaredMethod(
+                "innerBasicWhiteBoxCompileTest")).hasCompilationLevel(innerBasicWhiteBoxCompileTestCompLevel),
+                Frame.hasMethod(1, "testBasicWhiteBoxCompileTest"));
+        return true;
+    }
+
+    public static void main(String[] args) throws Exception {
         TracerTest tracerTest = new TracerTest();
-        tracerTest.testRunAndCompare();
+        tracerTest.testBasicWhiteBoxCompileTest();
     }
 }

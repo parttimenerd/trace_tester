@@ -57,7 +57,7 @@ jobject createMethodId(JNIEnv *env, jmethodID methodId) {
   jclass declaringClass;
   ensureSuccess(jvmti->GetMethodDeclaringClass(methodId, &declaringClass), "declaring class");
   ensureSuccess(jvmti->GetClassSignature(declaringClass, className.get_addr(), nullptr), "class signature");
-  
+
   // create the method object
   return env->NewObject(clazz, constructor, (jlong) methodId, env->NewStringUTF(className.get()),  env->NewStringUTF(name.get()), env->NewStringUTF(signature.get()));
 }
@@ -87,15 +87,9 @@ int countDiscardedFirstFrames(std::function<jmethodID(int)> getMethodId, int len
   int last = -1;
   for (int i = 0; i < length; i++) {
     jmethodID methodId = getMethodId(i);
-    fprintf(stderr, "frame %d: %p\n", i, methodId);
-    if (methodId != nullptr) {
-      printMethod(stderr, methodId);
-    }
     if (methodId != nullptr && isTracerMethod(methodId)) {
-      fprintf(stderr, "Discarding frame %d because it is a tracer method", i);
-      last = i;
+        last = i;
     }
-    fprintf(stderr, "\n");
   }
   return last + 1;
 }
@@ -130,12 +124,8 @@ int countFirstTracerFrames(jvmtiFrameInfo *frame, int length) {
 }
 
 jobject createTrace(JNIEnv *env, jvmtiFrameInfo *frame, int length) {
-    fprintf(stderr, "creating trace with length %d\n", length);
-
   jclass clazz = findClass(env, javaTraceClass, "tester/Trace");
-  fprintf(stderr, "creating trace with length %d\n", length);
   jmethodID constructor = findMethod(env, javaTraceClassConstructor, clazz, "<init>", "(I[Ltester/Frame;)V");
-  fprintf(stderr, "found method\n");
   jobjectArray frames = env->NewObjectArray(length, findClass(env, javaFrameClass, "tester/Frame$JavaFrame"), nullptr);
   for (int i = 0; i < length; i++) {
     env->SetObjectArrayElement(frames, i, createJavaFrame(env, frame + i));
@@ -184,7 +174,7 @@ int countFirstTracerFrames(ASGST_CallTrace *trace) {
       if (isJavaFrame(&frame)) {
         return ((ASGST_JavaFrame*) &frame)->method_id;
       }
-      return (jmethodID)nullptr; 
+      return (jmethodID)nullptr;
     }, trace->num_frames);
 }
 

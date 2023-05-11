@@ -451,7 +451,7 @@ class ThreadIdMap {
 
   std::recursive_mutex
     threadToJavaIdMutex; // hold this mutex while working with threadToJavaId
-  
+
   std::unordered_map<long, javaThreadId_t> threadToJavaId;
   std::unordered_map<javaThreadId_t, long> javaIdToThread;
 
@@ -514,10 +514,7 @@ jclass findClass(JNIEnv *env, jclass &cache, const char *name) {
 }
 
 jmethodID findMethod(JNIEnv *env, jmethodID &cache, jclass clazz, const char *name, const char *signature) {
-    fprintf(stderr, "find method %s\n", name);
-
   if (cache == nullptr) {
-    fprintf(stderr, "Error: cache method %s\n", name);
     cache = env->GetMethodID(clazz, name, signature);
     if (cache == nullptr) {
       // get name of class clazz
