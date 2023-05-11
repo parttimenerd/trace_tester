@@ -70,7 +70,10 @@
                             <arguments>
                                 <argument>--source-path</argument>
                                 <argument>${project.build.sourceDirectory}</argument>
+                                <argument>-cp</argument>
+                                <argument>${project.basedir}/lib/wb.jar</argument>
                                 <argument>${project.build.sourceDirectory}/tester/Tracer.java</argument>
+                                <argument>${project.build.sourceDirectory}/tester/util/NativeUtil.java</argument>
                                 <argument>-d</argument>
                                 <argument>${project.build.directory}/classes</argument>
                                 <argument>-h</argument>
@@ -110,6 +113,7 @@
                                     <directory>src/native/source</directory>
                                     <fileNames>
                                         <fileName>jni.cpp</fileName>
+                                        <fileName>native_util.cpp</fileName>
                                     </fileNames>
                                 </source>
                                 <source>
@@ -180,6 +184,7 @@
                                     <directory>src/native/source</directory>
                                     <fileNames>
                                         <fileName>jni.cpp</fileName>
+                                        <fileName>native_util.cpp</fileName>
                                     </fileNames>
                                 </source>
                                 <source>

@@ -417,7 +417,7 @@ void loop() {
     // wait for the stack to be walked, and block the thread from executing
     // we do not timeout here, as this leads to difficult bugs
     waitWhile([&](){ return _ucontext == nullptr;});
-    AsyncGetStackTrace(&_trace, settings.depth, (void*)_ucontext.load(), ASGST_INCLUDE_C_FRAMES);
+    AsyncGetStackTrace(&_trace, settings.depth, (void*)_ucontext.load(), settings.options);
     _ucontext = nullptr;
     _finished = true;
     lk.unlock();

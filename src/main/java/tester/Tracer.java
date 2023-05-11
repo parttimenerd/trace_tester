@@ -3,6 +3,7 @@ package tester;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static tester.Tracer.Options.*;
@@ -25,8 +26,8 @@ public class Tracer {
     enum Mode {
         GST(API.GST, "gst", 0, true),
         ASGCT(API.ASGCT, "asgct", 0, true),
-        ASGST(API.ASGST, "asgst_jni", ALLOW_TO_WALK_SAME_THREAD, false),
-        ASGST_SIGNAL_HANDLER(API.ASGST, "asgst_signal", ALLOW_TO_WALK_SAME_THREAD, true),
+        ASGST(API.ASGST, "asgst_jni", ASGST_WALK_SAME_THREAD, false),
+        ASGST_SIGNAL_HANDLER(API.ASGST, "asgst_signal", ASGST_WALK_SAME_THREAD, true),
         ASGST_SEPARATE_THREAD(API.ASGST, "asgst_separate", 0, true);
 
         public final String name;
@@ -56,7 +57,7 @@ public class Tracer {
         public static final int INCLUDE_C_FRAMES = 1;
         public static final int INCLUDE_NON_JAVA_THREADS = 2;
         public static final int INCLUDE_WALK_DURING_UNSAFE_STATES = 4;
-        public static final int ALLOW_TO_WALK_SAME_THREAD = 8;
+        public static final int ASGST_WALK_SAME_THREAD = 8;
 
         public static final int ALL = -1;
 
@@ -74,10 +75,27 @@ public class Tracer {
             if ((options & INCLUDE_WALK_DURING_UNSAFE_STATES) != 0) {
                 sb.append("u");
             }
-            if ((options & ALLOW_TO_WALK_SAME_THREAD) != 0) {
+            if ((options & ASGST_WALK_SAME_THREAD) != 0) {
                 sb.append("s");
             }
             return sb.toString();
+        }
+
+        public static String toLongString(int options) {
+            List<String> parts = new ArrayList<>();
+            if ((options & INCLUDE_C_FRAMES) != 0) {
+                parts.add("C frames");
+            }
+            if ((options & INCLUDE_NON_JAVA_THREADS) != 0) {
+                parts.add("include non-Java threads");
+            }
+            if ((options & INCLUDE_WALK_DURING_UNSAFE_STATES) != 0) {
+                parts.add("walk during unsafe states");
+            }
+            if ((options & ASGST_WALK_SAME_THREAD) != 0) {
+                parts.add("walk same thread");
+            }
+            return String.join(", ", parts);
         }
     }
 
@@ -126,11 +144,11 @@ public class Tracer {
         }
 
         boolean doesAllowToWalkSameThread() {
-            return (options & ALLOW_TO_WALK_SAME_THREAD) != 0;
+            return (options & ASGST_WALK_SAME_THREAD) != 0;
         }
 
         Configuration allowToWalkSameThread() {
-            return new Configuration(mode, options | ALLOW_TO_WALK_SAME_THREAD);
+            return new Configuration(mode, options | ASGST_WALK_SAME_THREAD);
         }
 
         Configuration withThread(long threadId) {
@@ -142,7 +160,7 @@ public class Tracer {
         }
 
         static Configuration asgct() {
-            return new Configuration(Mode.ASGST);
+            return new Configuration(Mode.ASGCT);
         }
 
         static Configuration asgst() {
@@ -160,6 +178,10 @@ public class Tracer {
         @Override
         public String toString() {
             return mode + "+" + Options.toString(options) + (threadId == -1 ? "" : "@" + threadId);
+        }
+
+        public String toLongString() {
+            return mode + ": " + Options.toLongString(options) + (threadId == -1 ? "" : " @" + threadId);
         }
     }
 
@@ -185,6 +207,10 @@ public class Tracer {
             Configuration.asgstSeparateThread().includeNonJavaThreads().includeCFrames().includeWalkDuringUnsafeStates()
     );
 
+    public static final List<Configuration> extensiveNonCASGSTConfigs = extensiveASGSTConfigs.stream()
+            .filter(c -> !c.doesIncludeCFrames())
+            .collect(Collectors.toList());
+
     /**
      * Basic list of ASGST related configurations which include C frames
      */
@@ -202,6 +228,14 @@ public class Tracer {
             Configuration.gst(),
             Configuration.asgct()
     ), extensiveASGSTConfigs);
+
+    public static final List<Configuration> extensiveNonCConfigs = extensiveConfigs.stream()
+            .filter(c -> !c.doesIncludeCFrames())
+            .collect(Collectors.toList());
+
+    public static final List<Configuration> extensiveCConfigs = extensiveConfigs.stream()
+            .filter(Configuration::doesIncludeCFrames)
+            .collect(Collectors.toList());
 
     public static final List<Configuration> basicJavaConfigs = List.of(
             Configuration.gst(),

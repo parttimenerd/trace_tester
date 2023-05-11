@@ -79,14 +79,15 @@ public abstract class Frame {
          */
         public JavaFrame(int bci, MethodId methodId) {
             super(ASGCT);
-            this.compLevel = -1;
+            this.compLevel = -2;
             this.bci = bci;
             this.methodId = methodId;
         }
 
+        /** ASGCT and GST native frame */
         public JavaFrame(MethodId methodId) {
             super(ASGCT_NATIVE);
-            this.compLevel = -1;
+            this.compLevel = -2;
             this.bci = -1;
             this.methodId = methodId;
         }
@@ -97,7 +98,15 @@ public abstract class Frame {
                 if (!frame.methodId.equals(methodId)) {
                     return false;
                 }
-                if (type != ASGCT_NATIVE && frame.type != ASGCT_NATIVE && frame.bci != bci) {
+                boolean thisNative = type == NATIVE || type == ASGCT_NATIVE;
+                boolean frameNative = frame.type == NATIVE || frame.type == ASGCT_NATIVE;
+                if (thisNative != frameNative) {
+                    return false;
+                }
+                if (thisNative) {
+                    return true;
+                }
+                if (frame.bci != bci) {
                     return false;
                 }
                 if (type == ASGCT || frame.type == ASGCT) {
@@ -207,6 +216,11 @@ public abstract class Frame {
             return hasCompilationLevel(compilationLevelAndInlining.level()).isInlined(compilationLevelAndInlining.inline());
         }
 
+        public Matcher isNative() {
+            return new Matcher(getFirst(), getSecond().and(frame -> frame.type == NATIVE), getThird() + " and " +
+                    "is native");
+        }
+
         public static Matcher of(int index, Predicate<JavaFrame> predicate, String description) {
             return new Matcher(index, predicate, description);
         }
@@ -218,6 +232,10 @@ public abstract class Frame {
 
     public static Matcher hasMethod(int index, String method, String signature) {
         return Matcher.of(index, frame -> frame.hasMethod(method, signature), "Has method " + method + " " + signature);
+    }
+
+    public static Matcher isCPP(int index) {
+        return Matcher.of(index, frame -> frame.type == CPP, "Is cpp frame");
     }
 
     public static class ExecutableMatcher extends Matcher {
