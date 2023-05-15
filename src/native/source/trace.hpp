@@ -36,8 +36,10 @@ static jclass methodIdClass = nullptr;
 static jmethodID methodIdClassConstructor = nullptr;
 static jclass frameBaseClass = nullptr;
 static jclass javaFrameClass = nullptr;
-static jmethodID javaFrameClassASGCTConstructor = nullptr;
-static jmethodID javaFrameClassASGCTNativeConstructor = nullptr;
+static jmethodID createASGCTJavaFrameMethod = nullptr;
+static jmethodID createASGCTNativeFrameMethod = nullptr;
+static jmethodID createGSTNativeFrameMethod = nullptr;
+static jmethodID createGSTJavaFrameMethod = nullptr;
 static jclass javaTraceClass = nullptr;
 static jmethodID javaTraceClassConstructor = nullptr;
 static jmethodID javaTraceClassErrorConstructor = nullptr;
@@ -64,16 +66,30 @@ jobject createMethodId(JNIEnv *env, jmethodID methodId) {
 
 jobject createASGCTJavaFrame(JNIEnv *env, jmethodID method_id, int bci) {
   jclass clazz = findClass(env, javaFrameClass, "tester/Frame$JavaFrame");
-  jmethodID constructor = findMethod(env, javaFrameClassASGCTConstructor, clazz, "<init>", "(ILtester/Frame$MethodId;)V");
+  jmethodID constructor = findMethod(env, createASGCTJavaFrameMethod, clazz, "createASGCTJavaFrame", "(Ltester/Frame$MethodId;I)Ltester/Frame$JavaFrame;", true);
   jobject methodId = createMethodId(env, method_id);
-  return env->NewObject(clazz, constructor, bci, methodId);
+  return env->CallStaticObjectMethod(clazz, constructor, methodId, bci);
 }
 
 jobject createASGCTNativeFrame(JNIEnv *env, jmethodID method_id) {
   jclass clazz = findClass(env, javaFrameClass, "tester/Frame$JavaFrame");
-  jmethodID constructor = findMethod(env, javaFrameClassASGCTNativeConstructor, clazz, "<init>", "(Ltester/Frame$MethodId;)V");
+  jmethodID constructor = findMethod(env, createASGCTNativeFrameMethod, clazz, "createASGCTNativeFrame", "(Ltester/Frame$MethodId;)Ltester/Frame$JavaFrame;", true);
   jobject methodId = createMethodId(env, method_id);
-  return env->NewObject(clazz, constructor, methodId);
+  return env->CallStaticObjectMethod(clazz, constructor, methodId);
+}
+
+jobject createGSTJavaFrame(JNIEnv *env, jmethodID method_id, int bci) {
+  jclass clazz = findClass(env, javaFrameClass, "tester/Frame$JavaFrame");
+  jmethodID constructor = findMethod(env, createGSTJavaFrameMethod, clazz, "createGSTJavaFrame", "(Ltester/Frame$MethodId;I)Ltester/Frame$JavaFrame;", true);
+  jobject methodId = createMethodId(env, method_id);
+  return env->CallStaticObjectMethod(clazz, constructor, methodId, bci);
+}
+
+jobject createGSTNativeFrame(JNIEnv *env, jmethodID method_id) {
+  jclass clazz = findClass(env, javaFrameClass, "tester/Frame$JavaFrame");
+  jmethodID constructor = findMethod(env, createGSTNativeFrameMethod, clazz, "createGSTNativeFrame", "(Ltester/Frame$MethodId;)Ltester/Frame$JavaFrame;", true);
+  jobject methodId = createMethodId(env, method_id);
+  return env->CallStaticObjectMethod(clazz, constructor, methodId);
 }
 
 jobject createJavaFrame(JNIEnv *env, ASGCT_CallFrame *frame) {
@@ -114,9 +130,9 @@ jobject createTrace(JNIEnv *env, ASGCT_CallTrace *trace) {
 
 jobject createJavaFrame(JNIEnv *env, jvmtiFrameInfo *frame) {
   if (frame->location < 0) {
-    return createASGCTNativeFrame(env, frame->method);
+    return createGSTNativeFrame(env, frame->method);
   }
-  return createASGCTJavaFrame(env, frame->method, frame->location);
+  return createGSTJavaFrame(env, frame->method, frame->location);
 }
 
 int countFirstTracerFrames(jvmtiFrameInfo *frame, int length) {

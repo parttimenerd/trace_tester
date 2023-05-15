@@ -20,10 +20,30 @@ public abstract class Frame {
 
     public static final int ASGCT_NATIVE = -2;
 
+    public static final int GST = -3;
+
+    public static final int GST_NATIVE = -4;
+
     public final int type;
 
     public Frame(int type) {
         this.type = type;
+    }
+
+    public boolean isNative() {
+        return type == NATIVE || type == ASGCT_NATIVE || type == GST_NATIVE;
+    }
+
+    public boolean isASGCT() {
+        return type == ASGCT || type == ASGCT_NATIVE;
+    }
+
+    public boolean isGST() {
+        return type == GST || type == GST_NATIVE;
+    }
+
+    public boolean isJavaNotNative() {
+        return type == JAVA || type == JAVA_INLINED || type == GST || type == ASGCT;
     }
 
     public boolean matches(Frame frame) {
@@ -61,6 +81,7 @@ public abstract class Frame {
     }
 
     public static class JavaFrame extends Frame {
+        private final static int ALLOWED_BCI_DIFFERENCE = 10;
         public final int compLevel;
         public final int bci;
 
@@ -68,7 +89,6 @@ public abstract class Frame {
 
         public JavaFrame(int type, int compLevel, int bci, MethodId methodId) {
             super(type);
-            assert type == JAVA || type == JAVA_INLINED || type == NATIVE || type == ASGCT;
             this.compLevel = compLevel;
             this.bci = bci;
             this.methodId = methodId;
@@ -77,19 +97,37 @@ public abstract class Frame {
         /**
          * ASGCT and GST Java frame
          */
-        public JavaFrame(int bci, MethodId methodId) {
-            super(ASGCT);
+        public JavaFrame(int type, int bci, MethodId methodId) {
+            super(type);
             this.compLevel = -2;
             this.bci = bci;
             this.methodId = methodId;
         }
 
-        /** ASGCT and GST native frame */
-        public JavaFrame(MethodId methodId) {
-            super(ASGCT_NATIVE);
+        /**
+         * ASGCT and GST native frame
+         */
+        public JavaFrame(int type, MethodId methodId) {
+            super(type);
             this.compLevel = -2;
             this.bci = -1;
             this.methodId = methodId;
+        }
+
+        public static JavaFrame createGSTJavaFrame(MethodId methodId, int bci) {
+            return new JavaFrame(GST, bci, methodId);
+        }
+
+        public static JavaFrame createGSTNativeFrame(MethodId methodId) {
+            return new JavaFrame(GST_NATIVE, methodId);
+        }
+
+        public static JavaFrame createASGCTJavaFrame(MethodId methodId, int bci) {
+            return new JavaFrame(ASGCT, bci, methodId);
+        }
+
+        public static JavaFrame createASGCTNativeFrame(MethodId methodId) {
+            return new JavaFrame(ASGCT_NATIVE, methodId);
         }
 
         @Override
@@ -98,19 +136,22 @@ public abstract class Frame {
                 if (!frame.methodId.equals(methodId)) {
                     return false;
                 }
-                boolean thisNative = type == NATIVE || type == ASGCT_NATIVE;
-                boolean frameNative = frame.type == NATIVE || frame.type == ASGCT_NATIVE;
+                boolean thisNative = isNative();
+                boolean frameNative = frame.isNative();
                 if (thisNative != frameNative) {
                     return false;
                 }
                 if (thisNative) {
                     return true;
                 }
-                if (frame.bci != bci) {
-                    return false;
+                if (frame.isGST() || isGST()) {
+                    return true; // bci is different for safe-point biased GetStackTrace
                 }
-                if (type == ASGCT || frame.type == ASGCT) {
-                    return true;
+                if (frame.bci != bci) {
+                    return Math.abs(frame.bci - bci) < ALLOWED_BCI_DIFFERENCE;
+                }
+                if (frame.isASGCT() || isASGCT()) {
+                    return true; // compilation level is not recorded for AsyncGetCallTrace
                 }
                 return frame.compLevel == compLevel && frame.type == type;
             }
@@ -270,5 +311,9 @@ public abstract class Frame {
 
     public boolean hasClassAndMethod(String clazz, String method) {
         return hasMethod(method) && this instanceof JavaFrame && ((JavaFrame) this).methodId.className.equals(clazz);
+    }
+
+    public Frame withoutBCI() {
+        return this;
     }
 }

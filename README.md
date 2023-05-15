@@ -36,6 +36,9 @@ For development, use bear to generate the compile_commands.json file:
 bear -- mvn compile
 ```
 
+Note: This project requires the `-Xbootclasspath/a:./lib/wb.jar -XX:+UnlockDiagnosticVMOptions -XX:+WhiteBoxAPI` options
+to be passed to the JVM, when running most of the tests directly. `mvn test` will do this automatically.
+
 License
 -------
 GPLv2, Copyright 2023 SAP SE or an SAP affiliate company, Johannes Bechberger

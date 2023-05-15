@@ -80,6 +80,7 @@ std::condition_variable _asgst_sep_cv;
 
 struct ThreadState {
   pthread_t thread;
+  JNIEnv *env;
 };
 
 jlong obtainJavaThreadIdViaJava(JNIEnv *env, jthread thread) {
@@ -112,6 +113,28 @@ jthread getJThreadForPThread(JNIEnv *env, pthread_t threadId) {
   return nullptr;
 }
 
+/**
+ * @brief Obtains the pthread_t for a given jthread and returns the current if this fails or the given thread is null.
+ *
+ * @param thread optional thread
+ */
+ThreadState getStateForJThread(JNIEnv* env, jthread thread) {
+  if (thread == nullptr) {
+    return {pthread_self(), env};
+  }
+  ThreadState *state;
+  jvmti->GetThreadLocalStorage(thread, (void **)&state);
+  if (state == nullptr) {
+    jvmtiThreadInfo info;
+    jvmti->GetThreadInfo(thread, &info);
+    fprintf(stderr, "Thread %s has no state\n", info.name);
+    return {pthread_self(), env};
+  }
+  return *state;
+}
+
+
+
 std::atomic<bool> shouldStop;
 
 static void loop();
@@ -135,7 +158,7 @@ void OnThreadStart(jvmtiEnv *jvmti_env, JNIEnv *jni_env, jthread thread) {
                         obtainJavaThreadIdViaJava(jni_env, thread));
 
   jvmti_env->SetThreadLocalStorage(
-      thread, new ThreadState({(pthread_t)get_thread_id()}));
+      thread, new ThreadState({pthread_self(), jni_env}));
 }
 
 void OnThreadEnd(jvmtiEnv *jvmti_env, JNIEnv *jni_env, jthread thread) {
@@ -266,6 +289,10 @@ bool sendSignal(pthread_t thread) {
 #endif
 }
 
+bool sendSignal(JNIEnv *env, jthread thread) {
+  return sendSignal(getStateForJThread(env, thread).thread);
+}
+
 /** idle wait till the atomic variable is as expected or the timeout is reached,
  * returns the value of the atomic variable */
 bool waitOnAtomic(std::atomic<bool> &atomic, bool expected = true,
@@ -295,10 +322,10 @@ bool checkJThread(jthread javaThread) {
  * Signature: (JI)Ltester/Trace;
  */
 JNIEXPORT jobject JNICALL Java_tester_Tracer_runGST
-  (JNIEnv *env, jclass, jlong threadId, jint depth) {
-    // TODO: don't ignore thread
-  jthread thread;
-  jvmti->GetCurrentThread(&thread);
+  (JNIEnv *env, jclass, jobject thread, jint depth) {
+  if (thread == nullptr) {
+    jvmti->GetCurrentThread(&thread);
+  }
   jvmtiFrameInfo gstFrames[MAX_DEPTH];
   jint gstCount = 0;
   jvmtiError err = jvmti->GetStackTrace(thread, 0, depth, gstFrames, &gstCount);
@@ -316,8 +343,7 @@ JNIEXPORT jobject JNICALL Java_tester_Tracer_runGST
  * Signature: (JI)Ltester/Trace;
  */
 JNIEXPORT jobject JNICALL Java_tester_Tracer_runASGCT
-  (JNIEnv *env, jclass, jlong threadId, jint depth) {
-// TODO: don't ignore thread
+  (JNIEnv *env, jclass, jint depth) {
   ASGCT_CallFrame frames[MAX_DEPTH];
   ASGCT_CallTrace trace;
   trace.frames = frames;
@@ -369,7 +395,7 @@ bool waitWhile(std::function<bool()> condition, long timeout_ns = -1) {
     return true;
 }
 
-enum class WalkMode { sameThread, separateThread };
+enum class WalkMode { sameThread, separateThread, asgctSameThread };
 
 struct WalkSettings {
   WalkMode mode;
@@ -382,24 +408,36 @@ std::atomic<WalkSettings*> _walkSettings;
 std::atomic<void*> _ucontext;
 ASGST_CallFrame _frames[MAX_DEPTH];
 ASGST_CallTrace _trace;
+ASGCT_CallFrame _asgct_frames[MAX_DEPTH];
+ASGCT_CallTrace _asgct_trace;
 std::atomic<bool> _finished;
 
 // see https://mostlynerdless.de/blog/2023/04/21/couldnt-we-just-use-asyncgetcalltrace-in-a-separate-thread/ for more explanations
 static void signalHandler(int signum, siginfo_t *info, void *ucontext) {
-  void* expected = nullptr;
-  if (!_ucontext.compare_exchange_strong(expected, ucontext) || _walkSettings == nullptr) {
-      // another signal handler invocation is already in progress
-      return;
-  }
   WalkSettings settings = *_walkSettings.load();
-  if (settings.mode == WalkMode::sameThread) {
-    AsyncGetStackTrace(&_trace, settings.depth, (ucontext_t*)ucontext, settings.options);
-    _ucontext = nullptr;
-    _finished = true;
-  } else {
-    // wait for the stack to be walked, and block the thread from executing
-    // we do not timeout here, as this leads to difficult bugs
-    waitWhile([&](){ return _ucontext != nullptr;});
+  switch (settings.mode) {
+    case WalkMode::sameThread:
+      AsyncGetStackTrace(&_trace, settings.depth, (ucontext_t*)ucontext, settings.options);
+      _ucontext = nullptr;
+      _finished = true;
+      break;
+    case WalkMode::separateThread:
+      {
+        void* expected = nullptr;
+        if (!_ucontext.compare_exchange_strong(expected, ucontext) || _walkSettings == nullptr) {
+            // another signal handler invocation is already in progress
+            return;
+        }
+        // wait for the stack to be walked, and block the thread from executing
+        // we do not timeout here, as this leads to difficult bugs
+        waitWhile([&](){ return _ucontext != nullptr;});
+        break;
+      }
+    case WalkMode::asgctSameThread:
+      asgct(&_asgct_trace, settings.depth, (ucontext_t*)ucontext);
+      _ucontext = nullptr;
+      _finished = true;
+      break;
   }
 }
 
@@ -424,6 +462,22 @@ void loop() {
     _asgst_sep_cv.notify_all();
   }
   jvm->DetachCurrentThread();
+}
+
+ASGCT_CallTrace* runASGCTInSignalHandler(JNIEnv *env, JNIEnv* threadEnv, pthread_t thread, jint depth) {
+  _asgct_trace.frames = _asgct_frames;
+  _asgct_trace.env_id = threadEnv;
+  WalkSettings settings{WalkMode::asgctSameThread, depth, 0, thread};
+  _walkSettings = &settings;
+  _finished = false;
+  _ucontext = nullptr;
+  if (!sendSignal(settings.thread)) {
+    fprintf(stderr, "failed to send signal to thread %ld\n", thread);
+    return nullptr;
+  }
+  waitWhile([&](){ return _finished == false;});
+  printASGCTTrace(stderr, _asgct_trace);
+  return &_asgct_trace;
 }
 
 ASGST_CallTrace* runASGST(WalkSettings settings) {
@@ -452,8 +506,8 @@ ASGST_CallTrace* runASGST(WalkSettings settings) {
  * Signature: (IJI)Ltester/Trace;
  */
 JNIEXPORT jobject JNICALL Java_tester_Tracer_runASGSTInSignalHandler
-  (JNIEnv *env, jclass, jint options, jlong, jint depth) {
-  ASGST_CallTrace* trace = runASGST({WalkMode::sameThread, depth, options, pthread_self()});
+  (JNIEnv *env, jclass, jint options, jobject thread, jint depth) {
+  ASGST_CallTrace* trace = runASGST({WalkMode::sameThread, depth, options, getStateForJThread(env, thread).thread});
   int app = countFirstTracerFrames(trace);
   trace->num_frames -= app;
   trace->frames += app;
@@ -466,8 +520,8 @@ JNIEXPORT jobject JNICALL Java_tester_Tracer_runASGSTInSignalHandler
  * Signature: (IJI)Ltester/Trace;
  */
 JNIEXPORT jobject JNICALL Java_tester_Tracer_runASGSTInSeparateThread
-  (JNIEnv *env, jclass, jint options, jlong, jint depth) {
-  ASGST_CallTrace* trace = runASGST({WalkMode::separateThread, depth, options, pthread_self()});
+  (JNIEnv *env, jclass, jint options, jobject thread, jint depth) {
+  ASGST_CallTrace* trace = runASGST({WalkMode::separateThread, depth, options, getStateForJThread(env, thread).thread});
   int app = countFirstTracerFrames(trace);
   trace->num_frames -= app;
   trace->frames += app;
@@ -475,72 +529,43 @@ JNIEXPORT jobject JNICALL Java_tester_Tracer_runASGSTInSeparateThread
   return t;
 }
 
-static jclass arrayListClass = nullptr;
-static jmethodID arrayListConstructor = nullptr;
-static jmethodID arrayListAdd = nullptr;
-static jclass javaThreadIdClass = nullptr;
-static jmethodID javaThreadIdConstructor = nullptr;
-static jclass longClass = nullptr;
-static jmethodID longConstructor = nullptr;
-
-
 /*
  * Class:     tester_Tracer
- * Method:    getJavaThreadIds
- * Signature: ()Ljava/util/List;
+ * Method:    runASGCTInSignalHandler
+ * Signature: (Ljava/lang/Thread;I)Ltester/Trace;
  */
-JNIEXPORT jobject JNICALL Java_tester_Tracer_getJavaThreadIds
-  (JNIEnv *env, jclass) {
-  jclass listClass = findClass(env, arrayListClass, "java/util/ArrayList");
-  jmethodID listConstructor = findMethod(env, arrayListConstructor, listClass, "<init>", "()V");
-  jmethodID listAdd = findMethod(env, arrayListAdd, listClass, "add", "(Ljava/lang/Object;)Z");
-  jclass javaThreadIdClass = findClass(env, javaThreadIdClass, "tester/Tracer$JavaThreadId");
-  jmethodID javaThreadIdConstructor = findMethod(env, javaThreadIdConstructor, javaThreadIdClass, "<init>", "(J)V");
-  jobject list = env->NewObject(listClass, listConstructor);
-  auto ids = threadIdMap.getAllJavaThreadIds();
-  for (auto id : ids) {
-    jobject javaThreadId = env->NewObject(javaThreadIdClass, javaThreadIdConstructor, id);
-    env->CallBooleanMethod(list, listAdd, javaThreadId);
+JNIEXPORT jobject JNICALL Java_tester_Tracer_runASGCTInSignalHandler
+  (JNIEnv *env, jclass, jobject thread, jint depth) {
+  ThreadState state = getStateForJThread(env, thread);
+  ASGCT_CallTrace* trace = runASGCTInSignalHandler(env, state.env, state.thread, depth);
+  if (trace == nullptr) {
+    return nullptr;
   }
-  return list;
+  int app = countFirstTracerFrames(trace);
+  trace->num_frames -= app;
+  trace->frames += app;
+  auto t = createTrace(env, trace);
+  return t;
 }
+
+jclass threadClass;
 
 /*
  * Class:     tester_Tracer
- * Method:    getOSThreadIds
- * Signature: ()Ljava/util/List;
+ * Method:    getThreads
+ * Signature: ()[Ljava/lang/Thread;
  */
-JNIEXPORT jobject JNICALL Java_tester_Tracer_getOSThreadIds
+JNIEXPORT jobjectArray JNICALL Java_tester_Tracer_getThreads
   (JNIEnv *env, jclass) {
-  jclass listClass = findClass(env, arrayListClass, "java/util/ArrayList");
-  jmethodID listConstructor = findMethod(env, arrayListConstructor, listClass, "<init>", "()V");
-  jmethodID listAdd = findMethod(env, arrayListAdd, listClass, "add", "(Ljava/lang/Object;)Z");
-  jobject list = env->NewObject(listClass, listConstructor);
-  jclass longClass = findClass(env, longClass, "java/lang/Long");
-  jmethodID longConstructor = findMethod(env, longConstructor, longClass, "<init>", "(J)V");
-  auto ids = obtainThreads();
-  for (auto id : ids) {
-    env->CallBooleanMethod(list, listAdd, env->NewObject(longClass, longConstructor, id));
+  // obtain all Java threads
+  jthread* threads;
+  jint threads_count;
+  jvmti->GetAllThreads(&threads_count, &threads);
+  // store the threads in an array
+  jclass thread = findClass(env, threadClass, "java/lang/Thread");
+  jobjectArray result = env->NewObjectArray(threads_count, thread, nullptr);
+  for (int i = 0; i < threads_count; i++) {
+    env->SetObjectArrayElement(result, i, threads[i]);
   }
-  return list;
-}
-
-/*
- * Class:     tester_Tracer
- * Method:    getOSThreadId
- * Signature: (J)J
- */
-JNIEXPORT jlong JNICALL Java_tester_Tracer_getOSThreadId
-  (JNIEnv *env, jclass, jlong javaThreadId) {
-  return (long)threadIdMap.getThread(javaThreadId);
-}
-
-/*
- * Class:     tester_Tracer
- * Method:    getCurrentOSThreadId
- * Signature: ()J
- */
-JNIEXPORT jlong JNICALL Java_tester_Tracer_getCurrentOSThreadId
-  (JNIEnv *env, jclass) {
-  return (long)pthread_self();
+  return result;
 }

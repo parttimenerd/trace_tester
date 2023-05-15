@@ -447,6 +447,7 @@ long get_thread_id() {
 
 typedef jlong javaThreadId_t;
 
+/** helps with Java threads */
 class ThreadIdMap {
 
   std::recursive_mutex
@@ -513,9 +514,13 @@ jclass findClass(JNIEnv *env, jclass &cache, const char *name) {
   return cache;
 }
 
-jmethodID findMethod(JNIEnv *env, jmethodID &cache, jclass clazz, const char *name, const char *signature) {
+jmethodID findMethod(JNIEnv *env, jmethodID &cache, jclass clazz, const char *name, const char *signature, bool isStatic = false) {
   if (cache == nullptr) {
-    cache = env->GetMethodID(clazz, name, signature);
+    if (isStatic) {
+      cache = env->GetStaticMethodID(clazz, name, signature);
+    } else {
+      cache = env->GetMethodID(clazz, name, signature);
+    }
     if (cache == nullptr) {
       // get name of class clazz
       JvmtiDeallocator<char*> className;

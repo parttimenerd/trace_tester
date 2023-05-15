@@ -25,7 +25,8 @@ public class Tracer {
      */
     enum Mode {
         GST(API.GST, "gst", 0, true),
-        ASGCT(API.ASGCT, "asgct", 0, true),
+        ASGCT(API.ASGCT, "asgct", 0, false),
+        ASGCT_SIGNAL_HANDLER(API.ASGCT, "asgct_signal", 0, true),
         ASGST(API.ASGST, "asgst_jni", ASGST_WALK_SAME_THREAD, false),
         ASGST_SIGNAL_HANDLER(API.ASGST, "asgst_signal", ASGST_WALK_SAME_THREAD, true),
         ASGST_SEPARATE_THREAD(API.ASGST, "asgst_separate", 0, true);
@@ -103,16 +104,16 @@ public class Tracer {
     /**
      * configuration of the sampling: mode + ASGST options and optional thread if it is not the current
      */
-    record Configuration(Mode mode, int options, long threadId) {
+    record Configuration(Mode mode, int options, Thread thread) {
 
         Configuration {
             assert mode != null;
             assert (options & mode.requiredOptions) == mode.requiredOptions;
-            assert mode.supportSpecificThread || threadId == -1;
+            assert mode.supportSpecificThread || thread == null;
         }
 
         public Configuration(Mode mode, int options) {
-            this(mode, options, -1);
+            this(mode, options, null);
         }
 
         Configuration(Mode mode) {
@@ -151,8 +152,8 @@ public class Tracer {
             return new Configuration(mode, options | ASGST_WALK_SAME_THREAD);
         }
 
-        Configuration withThread(long threadId) {
-            return new Configuration(mode, options, threadId);
+        Configuration withThread(Thread thread) {
+            return new Configuration(mode, options, thread);
         }
 
         static Configuration gst() {
@@ -161,6 +162,10 @@ public class Tracer {
 
         static Configuration asgct() {
             return new Configuration(Mode.ASGCT);
+        }
+
+        static Configuration asgctSignalHandler() {
+            return new Configuration(Mode.ASGCT_SIGNAL_HANDLER);
         }
 
         static Configuration asgst() {
@@ -177,11 +182,12 @@ public class Tracer {
 
         @Override
         public String toString() {
-            return mode + "+" + Options.toString(options) + (threadId == -1 ? "" : "@" + threadId);
+            return mode + (options != 0 ? "+" + Options.toString(options) : "") + (thread == null ? "" : "@" + thread);
         }
 
         public String toLongString() {
-            return mode + ": " + Options.toLongString(options) + (threadId == -1 ? "" : " @" + threadId);
+            return mode + (options != 0 ? ": " + Options.toLongString(options) : "") + (thread == null ? "" :
+                    " @" + thread);
         }
     }
 
@@ -226,7 +232,8 @@ public class Tracer {
      */
     public static final List<Configuration> extensiveConfigs = combine(List.of(
             Configuration.gst(),
-            Configuration.asgct()
+            Configuration.asgct(),
+            Configuration.asgctSignalHandler()
     ), extensiveASGSTConfigs);
 
     public static final List<Configuration> extensiveNonCConfigs = extensiveConfigs.stream()
@@ -240,6 +247,7 @@ public class Tracer {
     public static final List<Configuration> basicJavaConfigs = List.of(
             Configuration.gst(),
             Configuration.asgct(),
+            Configuration.asgctSignalHandler(),
             Configuration.asgst(),
             Configuration.asgstSignalHandler(),
             Configuration.asgstSeparateThread()
@@ -250,13 +258,9 @@ public class Tracer {
             Configuration.asgct()
     );
 
-    public static final List<Configuration> basicAllFrameConfigs = List.of(
-            Configuration.asgct(),
-            Configuration.asgst().includeCFrames(),
-            Configuration.asgstSignalHandler().includeCFrames(),
-            Configuration.asgstSeparateThread().includeCFrames()
-    );
-
+    public static final List<Configuration> extensiveSpecificThreadConfigs = extensiveConfigs.stream()
+            .filter(c -> c.mode.supportSpecificThread)
+            .collect(Collectors.toList());
     public final static List<Configuration> defaultConfigs = extensiveConfigs;
 
     private final List<Configuration> configurations;
@@ -288,38 +292,44 @@ public class Tracer {
     }
 
     public Trace runGST() {
-        return runGST(-1);
+        return runGST(null);
     }
 
-    public Trace runGST(JavaThreadId threadId) {
-        return runGST(getOSThreadId(threadId));
-    }
-
-    public Trace runGST(long threadId) {
-        return runGST(threadId, depth);
+    public Trace runGST(Thread thread) {
+        return runGST(thread, depth);
     }
 
     /**
      * walk the current stack using GetStackTrace
+     *
+     * @param thread the thread to walk, or null for the current thread
      */
-    public static native Trace runGST(long threadId, int depth);
+    public static native Trace runGST(Thread thread, int depth);
 
     public Trace runASGCT() {
-        return runASGCT(-1);
-    }
-
-    public Trace runASGCT(JavaThreadId threadId) {
-        return runASGCT(getOSThreadId(threadId));
-    }
-
-    public Trace runASGCT(long threadId) {
-        return runASGCT(threadId, depth);
+        return runASGCT(depth);
     }
 
     /**
      * walk the current stack using ASGCT
      */
-    public static native Trace runASGCT(long threadId, int depth);
+    public static native Trace runASGCT(int depth);
+
+    public Trace runASGCTInSignalHandler() {
+        return runASGCTInSignalHandler(null);
+    }
+
+    public Trace runASGCTInSignalHandler(Thread thread) {
+        return runASGCTInSignalHandler(thread, depth);
+    }
+
+
+    /**
+     * walk the current stack using ASGCT
+     *
+     * @param thread the thread to walk, or null for the current thread
+     */
+    public static native Trace runASGCTInSignalHandler(Thread thread, int depth);
 
     public Trace runASGST() {
         return runASGST(Mode.ASGST.requiredOptions);
@@ -339,63 +349,73 @@ public class Tracer {
     }
 
     public Trace runASGSTInSignalHandler(int options) {
+        return runASGSTInSignalHandler(options, null, depth);
+    }
+
+    public Trace runASGSTInSignalHandler(Thread thread) {
+        return runASGSTInSignalHandler(Mode.ASGST_SIGNAL_HANDLER.requiredOptions, thread, depth);
+    }
+
+    public Trace runASGSTInSignalHandler(int options, Thread thread) {
         assert ((options & Mode.ASGST_SIGNAL_HANDLER.requiredOptions) == Mode.ASGST_SIGNAL_HANDLER.requiredOptions);
-        return runASGSTInSignalHandler(options, null);
-    }
-
-    public Trace runASGSTInSignalHandler(int options, JavaThreadId threadId) {
-        return runASGSTInSignalHandler(options, -1, depth);
-    }
-
-    public Trace runASGSTInSignalHandler(int options, long threadId) {
-        return runASGSTInSignalHandler(options, threadId, depth);
+        return runASGSTInSignalHandler(options, thread, depth);
     }
 
     /**
      * walk the current stack using ASGST in a signal handler
      *
-     * @param threadId thread id of the thread to walk or -1 for the current thread
+     * @param thread thread to walk, null for current thread
      */
-    public static native Trace runASGSTInSignalHandler(int options, long threadId, int depth);
+    public static native Trace runASGSTInSignalHandler(int options, Thread thread, int depth);
 
     public Trace runASGSTInSeparateThread() {
         return runASGSTInSeparateThread(Mode.ASGST_SEPARATE_THREAD.requiredOptions);
     }
 
     public Trace runASGSTInSeparateThread(int options) {
-        return runASGSTInSeparateThread(options, -1);
+        return runASGSTInSeparateThread(options, null);
     }
 
-    public Trace runASGSTInSeparateThread(int options, JavaThreadId threadId) {
-        return runASGSTInSeparateThread(options, -1);
+    public Trace runASGSTInSeparateThread(Thread thread) {
+        return runASGSTInSeparateThread(0, thread, depth);
     }
 
-    public Trace runASGSTInSeparateThread(int options, long threadId) {
-        return runASGSTInSeparateThread(options, threadId, depth);
+    public Trace runASGSTInSeparateThread(int options, Thread thread) {
+        return runASGSTInSeparateThread(options, thread, depth);
     }
 
     /**
      * walk the current stack using ASGST in a separate thread
+     *
+     * @param thread thread to walk, null for current thread
      */
-    public static native Trace runASGSTInSeparateThread(int options, long threadId, int depth);
+    public static native Trace runASGSTInSeparateThread(int options, Thread thread, int depth);
 
     /**
      * walk the current stack using the given config
      */
     public Trace run(Configuration config) {
-        return run(config, depth);
+        return run(config, null);
+    }
+
+    public Trace run(Configuration config, Thread thread) {
+        return run(config, depth, thread);
     }
 
     /**
      * walk the current stack using the given config
+     *
+     * @param thread override the thread to walk, null for the thread from the config
      */
-    public Trace run(Configuration config, int depth) {
+    public Trace run(Configuration config, int depth, Thread thread) {
+        Thread t = thread == null ? config.thread : thread;
         return switch (config.mode) {
-            case GST -> runGST(config.threadId, depth);
-            case ASGCT -> runASGCT(config.threadId, depth);
+            case GST -> runGST(t, depth);
+            case ASGCT -> runASGCT(depth);
+            case ASGCT_SIGNAL_HANDLER -> runASGCTInSignalHandler(t, depth);
             case ASGST -> runASGST(config.options, depth);
-            case ASGST_SIGNAL_HANDLER -> runASGSTInSignalHandler(config.options, config.threadId, depth);
-            case ASGST_SEPARATE_THREAD -> runASGSTInSeparateThread(config.options, config.threadId, depth);
+            case ASGST_SIGNAL_HANDLER -> runASGSTInSignalHandler(config.options, t, depth);
+            case ASGST_SEPARATE_THREAD -> runASGSTInSeparateThread(config.options, t, depth);
         };
     }
 
@@ -403,7 +423,16 @@ public class Tracer {
      * trace the current stack using the set configs
      */
     public Trace runAndCompare() {
-        return runAndCompare(configurations, depth);
+        return runAndCompare(null);
+    }
+
+    /**
+     * trace the current stack using the set configs
+     *
+     * @param thread override the thread to walk, null for the thread from the configs
+     */
+    public Trace runAndCompare(Thread thread) {
+        return runAndCompare(configurations, depth, thread);
     }
 
     /**
@@ -456,12 +485,14 @@ public class Tracer {
     /**
      * walk the current stack using the given configs, throws an error
      *
+     * @param thread override the thread to walk, null for the thread from the configs
      * @return the longest trace
      * @throws TracesUnequalError if two of the traces are unequal
      */
-    private Trace runAndCompare(List<Configuration> configs, int depth) {
+    private Trace runAndCompare(List<Configuration> configs, int depth, Thread thread) {
         assert configs != null && configs.size() > 0;
-        var confTraces = configs.stream().map(config -> new ConfiguredTrace(config, run(config, depth))).toList();
+        var confTraces =
+                configs.stream().map(config -> new ConfiguredTrace(config, run(config, depth, thread))).toList();
         var first = confTraces.stream().max(Comparator.comparingInt(a -> a.trace.size())).orElseThrow();
         for (var other : confTraces) {
             if (other != first) {
@@ -471,19 +502,8 @@ public class Tracer {
         return first.trace;
     }
 
-    public record JavaThreadId(long id) {
-    }
-
-    public static native List<JavaThreadId> getJavaThreadIds();
-
-    public static native List<Long> getOSThreadIds();
-
-    public static long getOSThreadId(JavaThreadId id) {
-        return getOSThreadId(id.id);
-    }
-
-    private static native long getOSThreadId(long javaThreadId);
-
-    public static native long getCurrentOSThreadId();
-
+    /**
+     * return all Java threads
+     */
+    public static native Thread[] getThreads();
 }

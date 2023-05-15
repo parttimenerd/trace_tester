@@ -2,8 +2,11 @@ package tester;
 
 import jdk.test.whitebox.WhiteBox;
 import org.testng.annotations.Test;
+import tester.Tracer.Options;
 import tester.util.CompilationLevel;
 import tester.util.WhiteBoxUtil;
+
+import java.util.Arrays;
 
 import static org.testng.AssertJUnit.assertEquals;
 import static org.testng.AssertJUnit.assertTrue;
@@ -143,7 +146,6 @@ public class TracerTest {
     }
 
     public static void main(String[] args) throws Exception {
-        TracerTest tracerTest = new TracerTest();
-        tracerTest.testBasicWhiteBoxCompileTest();
+
     }
 }

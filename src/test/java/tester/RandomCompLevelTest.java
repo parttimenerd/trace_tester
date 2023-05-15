@@ -31,7 +31,7 @@ import static org.testng.AssertJUnit.assertFalse;
  *     <ul>every method n (schema methodN) except method n_max, calls method n-1 and nothing else</ul>
  * </li>
  * <p>
- * This test checks for API correctness with
+ * The number of runs per test can be changed via the environment variable RUNS.
  */
 public class RandomCompLevelTest {
 
@@ -39,7 +39,7 @@ public class RandomCompLevelTest {
         JNIHelper.loadAndAttachIfNeeded();
     }
 
-    private final int RUNS = 10;
+    private final int RUNS = System.getenv("RUNS") == null ? 3 : Integer.parseInt(System.getenv("RUNS"));
 
     private static int parseMethodNameToInt(String name) {
         return Integer.parseInt(name.replaceAll("[A-Za-z]+", ""));

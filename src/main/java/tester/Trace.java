@@ -127,7 +127,33 @@ public class Trace extends AbstractList<Frame> {
         if (ignoreNonJavaFrames) {
             return withoutNonJavaFrames().frames.equals(other.withoutNonJavaFrames().frames);
         }
-        return frames.equals(other.frames);
+        return equalsIgnoringTopNonJavaFrames(other);
+    }
+
+    /**
+     * Compare two traces that both have non-java frames, disregarding any differences in the top most non-java frames.
+     */
+    private boolean equalsIgnoringTopNonJavaFrames(Trace other) {
+        int firstJavaFrameIndex = topMostJavaFrameIndex();
+        int otherFirstJavaFrameIndex = other.topMostJavaFrameIndex();
+        for (int i = firstJavaFrameIndex; i < size(); i++) {
+            if (!get(i).equals(other.get(i - firstJavaFrameIndex + otherFirstJavaFrameIndex))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * -1 if no Java frame found
+     */
+    public int topMostJavaFrameIndex() {
+        for (int i = 0; i < size(); i++) {
+            if (get(i).type == Frame.JAVA) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     public Frame topFrame() {
