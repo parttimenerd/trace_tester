@@ -39,6 +39,20 @@ bear -- mvn compile
 Note: This project requires the `-Xbootclasspath/a:./lib/wb.jar -XX:+UnlockDiagnosticVMOptions -XX:+WhiteBoxAPI` options
 to be passed to the JVM, when running most of the tests directly. `mvn test` will do this automatically.
 
+Agent
+-----
+The agent can be used to compare the results of GetStackTrace, AsyncGetCallTrace and AsyncGetStackTrace.
+
+To build the agent, run (after building the OpenJDK fork and running `mvn initialize`):
+```sh
+mvn package
+```
+
+Usage:
+```sh
+java -Xbootclasspath/a:./wb.jar -XX:+UnlockDiagnosticVMOptions -XX:+WhiteBoxAPI -agentpath:./target/tester-agent.jar -jar <your-jar>
+```
+
 License
 -------
 GPLv2, Copyright 2023 SAP SE or an SAP affiliate company, Johannes Bechberger

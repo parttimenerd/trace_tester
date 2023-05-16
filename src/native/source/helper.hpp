@@ -24,6 +24,7 @@
 
 #pragma once
 
+#include <sstream>
 #ifndef _XOPEN_SOURCE
 #define _XOPEN_SOURCE 600
 #endif
@@ -94,8 +95,10 @@ class JvmtiDeallocator {
 
 void ensureSuccess(jvmtiError err, const char *msg) {
   if (err != JVMTI_ERROR_NONE) {
-    fprintf(stderr, "Error in %s: %d", msg, err);
-    exit(1);
+        std::stringstream ss;
+    ss << "Error in " << msg << ": " << err;
+    fprintf(stderr, "%s", ss.str().c_str());
+    throw std::runtime_error(ss.str());
   }
 }
 
@@ -106,7 +109,7 @@ static void GetJMethodIDs(jclass klass) {
 
   // If ever the GetClassMethods fails, just ignore it, it was worth a try.
   if (err != JVMTI_ERROR_NONE && err != JVMTI_ERROR_CLASS_NOT_PREPARED) {
-    fprintf(stderr, "GetJMethodIDs: Error in GetClassMethods: %d\n", err);
+    //fprintf(stderr, "GetJMethodIDs: Error in GetClassMethods: %d\n", err);
   }
 }
 

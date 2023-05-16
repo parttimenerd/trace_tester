@@ -23,7 +23,7 @@ public class Tracer {
     /**
      * sampling mode
      */
-    enum Mode {
+    public enum Mode {
         GST(API.GST, "gst", 0, true),
         ASGCT(API.ASGCT, "asgct", 0, false),
         ASGCT_SIGNAL_HANDLER(API.ASGCT, "asgct_signal", 0, true),
@@ -104,9 +104,9 @@ public class Tracer {
     /**
      * configuration of the sampling: mode + ASGST options and optional thread if it is not the current
      */
-    record Configuration(Mode mode, int options, Thread thread) {
+    public record Configuration(Mode mode, int options, Thread thread) {
 
-        Configuration {
+        public Configuration {
             assert mode != null;
             assert (options & mode.requiredOptions) == mode.requiredOptions;
             assert mode.supportSpecificThread || thread == null;
@@ -261,6 +261,12 @@ public class Tracer {
     public static final List<Configuration> extensiveSpecificThreadConfigs = extensiveConfigs.stream()
             .filter(c -> c.mode.supportSpecificThread)
             .collect(Collectors.toList());
+
+    public static final List<Configuration> basicSeperateThreadConfigs = List.of(
+            Configuration.gst(),
+            Configuration.asgctSignalHandler(),
+            Configuration.asgstSignalHandler()
+    );
     public final static List<Configuration> defaultConfigs = extensiveConfigs;
 
     private final List<Configuration> configurations;

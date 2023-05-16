@@ -29,6 +29,7 @@
 #include "jvmti.h"
 #include <profile.h>
 #include <unordered_map>
+#include <iostream>
 
 // helps to create Java Trace objects
 
@@ -115,17 +116,28 @@ int countFirstTracerFrames(ASGCT_CallTrace *trace) {
 }
 
 jobject createTrace(JNIEnv *env, ASGCT_CallTrace *trace) {
-  jclass clazz = findClass(env, javaTraceClass, "tester/Trace");
-  if (trace->num_frames < 0) {
-    jmethodID constructor = findMethod(env, javaTraceClassErrorConstructor, clazz, "<init>", "(II)V");
-    return env->NewObject(clazz, constructor, 0 /* JAVA_TRACE */, trace->num_frames);
+  try {
+    jclass clazz = findClass(env, javaTraceClass, "tester/Trace");
+    if (trace->num_frames < 0) {
+      jmethodID constructor = findMethod(env, javaTraceClassErrorConstructor, clazz, "<init>", "(II)V");
+      return env->NewObject(clazz, constructor, 0 /* JAVA_TRACE */, trace->num_frames);
+    }
+    try {
+      jmethodID constructor = findMethod(env, javaTraceClassConstructor, clazz, "<init>", "(I[Ltester/Frame;)V");
+      jobjectArray frames = env->NewObjectArray(trace->num_frames, findClass(env, javaFrameClass, "tester/Frame$JavaFrame"), nullptr);
+      for (int i = 0; i < trace->num_frames; i++) {
+        env->SetObjectArrayElement(frames, i, createJavaFrame(env, &trace->frames[i]));
+      }
+      return env->NewObject(clazz, constructor, ASGST_JAVA_TRACE, frames);
+    } catch (const std::runtime_error &e) {
+      std::cerr << "Exception in createTrace: " << e.what() << std::endl;
+      jmethodID constructor = findMethod(env, javaTraceClassErrorConstructor, clazz, "<init>", "(II)V");
+      return env->NewObject(clazz, constructor, 0 /* JAVA_TRACE */, -100);
+    }
+  } catch (std::runtime_error &e) {
+    std::cerr << "Exception in createTrace: " << e.what() << std::endl;
+    return nullptr;
   }
-  jmethodID constructor = findMethod(env, javaTraceClassConstructor, clazz, "<init>", "(I[Ltester/Frame;)V");
-  jobjectArray frames = env->NewObjectArray(trace->num_frames, findClass(env, javaFrameClass, "tester/Frame$JavaFrame"), nullptr);
-  for (int i = 0; i < trace->num_frames; i++) {
-    env->SetObjectArrayElement(frames, i, createJavaFrame(env, &trace->frames[i]));
-  }
-  return env->NewObject(clazz, constructor, ASGST_JAVA_TRACE, frames);
 }
 
 jobject createJavaFrame(JNIEnv *env, jvmtiFrameInfo *frame) {
@@ -140,13 +152,18 @@ int countFirstTracerFrames(jvmtiFrameInfo *frame, int length) {
 }
 
 jobject createTrace(JNIEnv *env, jvmtiFrameInfo *frame, int length) {
-  jclass clazz = findClass(env, javaTraceClass, "tester/Trace");
-  jmethodID constructor = findMethod(env, javaTraceClassConstructor, clazz, "<init>", "(I[Ltester/Frame;)V");
-  jobjectArray frames = env->NewObjectArray(length, findClass(env, javaFrameClass, "tester/Frame$JavaFrame"), nullptr);
-  for (int i = 0; i < length; i++) {
-    env->SetObjectArrayElement(frames, i, createJavaFrame(env, frame + i));
+  try {
+    jclass clazz = findClass(env, javaTraceClass, "tester/Trace");
+    jmethodID constructor = findMethod(env, javaTraceClassConstructor, clazz, "<init>", "(I[Ltester/Frame;)V");
+    jobjectArray frames = env->NewObjectArray(length, findClass(env, javaFrameClass, "tester/Frame$JavaFrame"), nullptr);
+    for (int i = 0; i < length; i++) {
+      env->SetObjectArrayElement(frames, i, createJavaFrame(env, frame + i));
+    }
+    return env->NewObject(clazz, constructor, ASGST_JAVA_TRACE, frames);
+  } catch (std::runtime_error &e) {
+    std::cerr << "Exception in createTrace: " << e.what() << std::endl;
+    return nullptr;
   }
-  return env->NewObject(clazz, constructor, ASGST_JAVA_TRACE, frames);
 }
 
 jobject createJavaFrame(JNIEnv *env, ASGST_JavaFrame *frame) {
@@ -195,17 +212,22 @@ int countFirstTracerFrames(ASGST_CallTrace *trace) {
 }
 
 jobject createTrace(JNIEnv *env, ASGST_CallTrace *trace) {
-  jclass clazz = findClass(env, javaTraceClass, "tester/Trace");
-  if (trace->num_frames < 0) {
-    jmethodID constructor = findMethod(env, javaTraceClassErrorConstructor, clazz, "<init>", "(II)V");
-    return env->NewObject(clazz, constructor, trace->kind, trace->num_frames);
+  try {
+    jclass clazz = findClass(env, javaTraceClass, "tester/Trace");
+    if (trace->num_frames < 0) {
+      jmethodID constructor = findMethod(env, javaTraceClassErrorConstructor, clazz, "<init>", "(II)V");
+      return env->NewObject(clazz, constructor, trace->kind, trace->num_frames);
+    }
+    jmethodID constructor = findMethod(env, javaTraceClassConstructor, clazz, "<init>", "(I[Ltester/Frame;)V");
+    jobjectArray frames = env->NewObjectArray(trace->num_frames, findClass(env, frameBaseClass, "tester/Frame"), nullptr);
+    for (int i = 0; i < trace->num_frames; i++) {
+      auto f = createFrame(env, &trace->frames[i]);
+      env->SetObjectArrayElement(frames, i, f);
+    }
+    return env->NewObject(clazz, constructor, trace->kind, frames);
+  } catch (std::runtime_error &e) {
+    std::cerr << "Exception in createTrace: " << e.what() << std::endl;
+    return nullptr;
   }
-  jmethodID constructor = findMethod(env, javaTraceClassConstructor, clazz, "<init>", "(I[Ltester/Frame;)V");
-  jobjectArray frames = env->NewObjectArray(trace->num_frames, findClass(env, frameBaseClass, "tester/Frame"), nullptr);
-  for (int i = 0; i < trace->num_frames; i++) {
-    auto f = createFrame(env, &trace->frames[i]);
-    env->SetObjectArrayElement(frames, i, f);
-  }
-  return env->NewObject(clazz, constructor, trace->kind, frames);
 }
 

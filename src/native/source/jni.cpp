@@ -113,6 +113,12 @@ jthread getJThreadForPThread(JNIEnv *env, pthread_t threadId) {
   return nullptr;
 }
 
+bool hasThreadState(jthread thread) {
+  ThreadState *state;
+  jvmti->GetThreadLocalStorage(thread, (void **)&state);
+  return state != nullptr;
+}
+
 /**
  * @brief Obtains the pthread_t for a given jthread and returns the current if this fails or the given thread is null.
  *
@@ -153,7 +159,14 @@ void onAbort() {
   }
 }
 
+bool primedClasses = false;
+
+void primeClasses();
+
 void OnThreadStart(jvmtiEnv *jvmti_env, JNIEnv *jni_env, jthread thread) {
+  if (!primedClasses) {
+    primeClasses();
+  }
   threadIdMap.addThread(get_thread_id(),
                         obtainJavaThreadIdViaJava(jni_env, thread));
 
@@ -263,7 +276,6 @@ static jint Agent_Initialize(JavaVM *_jvm, char *options, void *reserved) {
                 "thread end");
   initASGCT();
   startSamplerThread();
-  primeClasses();
   return JNI_OK;
 }
 
@@ -476,7 +488,6 @@ ASGCT_CallTrace* runASGCTInSignalHandler(JNIEnv *env, JNIEnv* threadEnv, pthread
     return nullptr;
   }
   waitWhile([&](){ return _finished == false;});
-  printASGCTTrace(stderr, _asgct_trace);
   return &_asgct_trace;
 }
 
@@ -561,11 +572,20 @@ JNIEXPORT jobjectArray JNICALL Java_tester_Tracer_getThreads
   jthread* threads;
   jint threads_count;
   jvmti->GetAllThreads(&threads_count, &threads);
+
+  std::vector<jthread> threads_vec;
+  for (int i = 0; i < threads_count; i++) {
+    jthread thread = threads[i];
+    if (hasThreadState(thread)) {
+      threads_vec.push_back(thread);
+    }
+  }
+
   // store the threads in an array
   jclass thread = findClass(env, threadClass, "java/lang/Thread");
-  jobjectArray result = env->NewObjectArray(threads_count, thread, nullptr);
-  for (int i = 0; i < threads_count; i++) {
-    env->SetObjectArrayElement(result, i, threads[i]);
+  jobjectArray result = env->NewObjectArray(threads_vec.size(), thread, nullptr);
+  for (int i = 0; i < threads_vec.size(); i++) {
+    env->SetObjectArrayElement(result, i, threads_vec.at(i));
   }
   return result;
 }

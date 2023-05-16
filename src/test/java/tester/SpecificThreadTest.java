@@ -24,15 +24,13 @@ public class SpecificThreadTest {
         }
     }
 
-    Matcher[] matchers = new Matcher[]{
-            Frame.hasMethod(0, "run", "()V")
-    };
+    Matcher[] matchers = new Matcher[]{Frame.hasMethod(0, "run", "()V")};
 
     private void withDoSomethingThread(Function<Thread, Trace> callable) throws Exception {
         DoSomethingThread t = new DoSomethingThread();
         t.setName("DoSomethingThread");
         t.start();
-        while (!t.started) ; // whait till the thread is in the run method
+        while (!t.started) ; // wait till the thread is in the run method
         try {
             callable.apply(t).assertTrue(matchers);
         } finally {
@@ -62,6 +60,7 @@ public class SpecificThreadTest {
 
     @Test
     public void compareTest() throws Exception {
-        withDoSomethingThread(t -> new Tracer(Tracer.extensiveSpecificThreadConfigs).runAndCompare(t));
+        withDoSomethingThread(t -> new Tracer(Tracer.extensiveSpecificThreadConfigs).runAndCompare(t)
+                .withoutNonJavaFrames());
     }
 }
