@@ -97,7 +97,6 @@ void ensureSuccess(jvmtiError err, const char *msg) {
   if (err != JVMTI_ERROR_NONE) {
         std::stringstream ss;
     ss << "Error in " << msg << ": " << err;
-    fprintf(stderr, "%s", ss.str().c_str());
     throw std::runtime_error(ss.str());
   }
 }
@@ -106,11 +105,6 @@ static void GetJMethodIDs(jclass klass) {
   jint method_count = 0;
   JvmtiDeallocator<jmethodID*> methods;
   jvmtiError err = jvmti->GetClassMethods(klass, &method_count, methods.get_addr());
-
-  // If ever the GetClassMethods fails, just ignore it, it was worth a try.
-  if (err != JVMTI_ERROR_NONE && err != JVMTI_ERROR_CLASS_NOT_PREPARED) {
-    //fprintf(stderr, "GetJMethodIDs: Error in GetClassMethods: %d\n", err);
-  }
 }
 
 // assumes that getcontext is called in the beginning of the function
@@ -534,7 +528,7 @@ jmethodID findMethod(JNIEnv *env, jmethodID &cache, jclass clazz, const char *na
       jint methodCount;
       JvmtiDeallocator<jmethodID*> methods;
       ensureSuccess(jvmti->GetClassMethods(clazz, &methodCount, methods.get_addr()), "Could not get methods of class");
-      fprintf(stderr, "did you mean\n", className.get());
+      fprintf(stderr, "did you mean\n");
       for (int i = 0; i < methodCount; i++) {
         char *methodName;
         char *methodSignature;
@@ -546,4 +540,14 @@ jmethodID findMethod(JNIEnv *env, jmethodID &cache, jclass clazz, const char *na
     }
   }
   return cache;
+}
+
+std::vector<jint> intArrayToVector(JNIEnv *env, jintArray array) {
+  std::vector<jint> result;
+  if (array != nullptr) {
+    jsize size = env->GetArrayLength(array);
+    result.resize(size);
+    env->GetIntArrayRegion(array, 0, size, &result[0]);
+  }
+  return result;
 }

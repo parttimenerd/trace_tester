@@ -63,4 +63,17 @@ public class SpecificThreadTest {
         withDoSomethingThread(t -> new Tracer(Tracer.extensiveSpecificThreadConfigs).runAndCompare(t)
                 .withoutNonJavaFrames());
     }
+
+    @Test(timeOut = 10000)
+    public void testASGSTSeparateThreadMultipleRuns() throws Exception {
+        withDoSomethingThread(t -> {
+            for (int i = 0; i < 10; i++) {
+                long start = System.currentTimeMillis();
+                new Tracer().runASGSTInSeparateThread(t);
+                new Tracer().runASGSTInSeparateThread();
+                System.out.println("runASGSTInSeparateThread took " + (System.currentTimeMillis() - start) + "ms");
+            }
+            return new Tracer().runASGSTInSeparateThread(t);
+        });
+    }
 }

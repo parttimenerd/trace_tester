@@ -31,6 +31,7 @@
 #include <assert.h>
 #include <cassert>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <dirent.h>
 #include <dlfcn.h>
@@ -74,9 +75,6 @@ const int MAX_DEPTH = 1024;
 static JavaVM *jvm;
 
 static ThreadIdMap threadIdMap;
-
-std::mutex _asgst_sep_m;
-std::condition_variable _asgst_sep_cv;
 
 struct ThreadState {
   pthread_t thread;
@@ -139,21 +137,14 @@ ThreadState getStateForJThread(JNIEnv* env, jthread thread) {
   return *state;
 }
 
-
-
 std::atomic<bool> shouldStop;
 
 static void loop();
 
 std::thread samplerThread;
 
-void printAGInfo();
-
-void printAGInfoIfNeeded();
-
 void onAbort() {
   shouldStop = true;
-  _asgst_sep_cv.notify_all();
   if (samplerThread.joinable()) {
     samplerThread.join();
   }
@@ -163,15 +154,19 @@ bool primedClasses = false;
 
 void primeClasses();
 
-void OnThreadStart(jvmtiEnv *jvmti_env, JNIEnv *jni_env, jthread thread) {
+void registerThread(JNIEnv *jni_env, jthread thread) {
   if (!primedClasses) {
     primeClasses();
   }
   threadIdMap.addThread(get_thread_id(),
                         obtainJavaThreadIdViaJava(jni_env, thread));
 
-  jvmti_env->SetThreadLocalStorage(
+  jvmti->SetThreadLocalStorage(
       thread, new ThreadState({pthread_self(), jni_env}));
+}
+
+void OnThreadStart(jvmtiEnv *jvmti_env, JNIEnv *jni_env, jthread thread) {
+  registerThread(jni_env, thread);
 }
 
 void OnThreadEnd(jvmtiEnv *jvmti_env, JNIEnv *jni_env, jthread thread) {
@@ -346,13 +341,13 @@ JNIEXPORT jobject JNICALL Java_tester_Tracer_runGST
     return nullptr;
   }
   int app = countFirstTracerFrames(gstFrames, gstCount);
-  return createTrace(env, (jvmtiFrameInfo*)gstFrames + app, gstCount - app);
+  return createTraceWithoutTracerFrames(env, (jvmtiFrameInfo*)gstFrames + app, gstCount - app);
 }
 
 /*
  * Class:     tester_Tracer
  * Method:    runASGCT
- * Signature: (JI)Ltester/Trace;
+ * Signature: (I)Ltester/Trace;
  */
 JNIEXPORT jobject JNICALL Java_tester_Tracer_runASGCT
   (JNIEnv *env, jclass, jint depth) {
@@ -367,7 +362,7 @@ JNIEXPORT jobject JNICALL Java_tester_Tracer_runASGCT
   int app = countFirstTracerFrames(&trace);
   trace.num_frames -= app;
   trace.frames += app;
-  return createTrace(env, &trace);
+  return createTraceWithoutTracerFrames(env, &trace);
 }
 
 /*
@@ -386,7 +381,7 @@ JNIEXPORT jobject JNICALL Java_tester_Tracer_runASGST
   int app = countFirstTracerFrames(&trace);
   trace.num_frames -= app;
   trace.frames += app;
-  return createTrace(env, &trace);
+  return createTraceWithoutTracerFrames(env, &trace);
 }
 
 long nanotime() {
@@ -407,16 +402,86 @@ bool waitWhile(std::function<bool()> condition, long timeout_ns = -1) {
     return true;
 }
 
-enum class WalkMode { sameThread, separateThread, asgctSameThread };
+enum class WalkMode { sameThread, separateThread, asgctSameThread, multiple, multipleSig, multipleSep };
+
+/** options for the more complex multiple mode */
+struct MultipleOptions {
+  jboolean asgctSig;
+  std::vector<jint> asgstSepThreadOptions;
+  std::vector<jint> asgstSigOptions;
+
+  bool hasASGSTSepThread() const { return asgstSepThreadOptions.size() > 0; }
+  bool hasASGSTSig() const { return asgstSigOptions.size() > 0; }
+
+  bool needsSeparateThread() const {
+    return hasASGSTSepThread();
+  }
+
+  bool needsSignalHandler() const {
+    return hasASGSTSig() || asgctSig;
+  }
+};
+
+struct MultipleTraces {
+  MultipleOptions *options;
+  ASGCT_CallFrame asgctSigFrames[MAX_DEPTH];
+  ASGCT_CallTrace asgctSigTrace;
+  std::vector<std::array<ASGST_CallFrame, MAX_DEPTH>> asgstSepThreadFramess;
+  std::vector<ASGST_CallTrace> asgstSepThreadTraces;
+  std::vector<std::array<ASGST_CallFrame, MAX_DEPTH>> asgstSigFramess;
+  std::vector<ASGST_CallTrace> asgstSigTraces;
+
+  void init(JNIEnv *threadEnv, MultipleOptions *options) {
+    this->options = options;
+    asgctSigTrace.frames = asgctSigFrames;
+    asgctSigTrace.num_frames = 0;
+    asgctSigTrace.env_id = threadEnv;
+    allocate(asgstSepThreadFramess, asgstSepThreadTraces, options->asgstSepThreadOptions.size());
+    allocate(asgstSigFramess, asgstSigTraces, options->asgstSigOptions.size());
+  }
+
+private:
+  void allocate(std::vector<std::array<ASGST_CallFrame, MAX_DEPTH>> &framess, std::vector<ASGST_CallTrace> &traces, size_t count) {
+    framess.resize(count);
+    traces.resize(count);
+    for (size_t i = 0; i < count; i++) {
+      traces[i].frames = framess[i].data();
+      traces[i].num_frames = 0;
+    }
+  }
+
+  void addToArray(JNIEnv *env, jobjectArray array, jint offset, std::vector<ASGST_CallTrace> &traces) {
+    for (size_t i = 0; i < traces.size(); i++) {
+      env->SetObjectArrayElement(array, offset + i, createTraceWithoutTracerFrames(env, &traces[i]));
+    }
+  }
+
+public:
+
+  jobjectArray toTraceArray(JNIEnv *env) {
+    jclass traceClass = env->FindClass("tester/Trace");
+    jobjectArray array = env->NewObjectArray(1 + asgstSepThreadTraces.size() + asgstSigTraces.size(), traceClass, nullptr);
+    env->SetObjectArrayElement(array, 0, options->asgctSig ? createTraceWithoutTracerFrames(env, &asgctSigTrace) : nullptr);
+    addToArray(env, array, 1, asgstSepThreadTraces);
+    addToArray(env, array, 1 + asgstSepThreadTraces.size(), asgstSigTraces);
+    return array;
+  }
+
+};
 
 struct WalkSettings {
   WalkMode mode;
+  // only valid in multiple or multipleSig mode, or null
+  MultipleOptions *multipleOptions;
   jint depth;
+  // only valid in non-multiple mode
   jint options;
   pthread_t thread;
 };
 
+jthread loopThread;
 std::atomic<WalkSettings*> _walkSettings;
+std::atomic<bool> triggerLoopIteration = {false};
 std::atomic<void*> _ucontext;
 ASGST_CallFrame _frames[MAX_DEPTH];
 ASGST_CallTrace _trace;
@@ -424,18 +489,42 @@ ASGCT_CallFrame _asgct_frames[MAX_DEPTH];
 ASGCT_CallTrace _asgct_trace;
 std::atomic<bool> _finished;
 
+// for multiple mode
+MultipleTraces _multipleTraces;
+
+// deals with ASGCT and ASGST in signal handler
+static void signalHandlerPartOfMultipleTraces(void *ucontext, jint depth, MultipleOptions *options) {
+  if (options->asgctSig) {
+    asgct(&_multipleTraces.asgctSigTrace, depth, ucontext);
+  }
+  for (size_t i = 0; i < options->asgstSigOptions.size(); i++) {
+    AsyncGetStackTrace(&_multipleTraces.asgstSigTraces[i], depth, ucontext, options->asgstSigOptions[i]);
+  }
+}
+
 // see https://mostlynerdless.de/blog/2023/04/21/couldnt-we-just-use-asyncgetcalltrace-in-a-separate-thread/ for more explanations
 static void signalHandler(int signum, siginfo_t *info, void *ucontext) {
   WalkSettings settings = *_walkSettings.load();
   switch (settings.mode) {
     case WalkMode::sameThread:
-      AsyncGetStackTrace(&_trace, settings.depth, (ucontext_t*)ucontext, settings.options);
+      AsyncGetStackTrace(&_trace, settings.depth, ucontext, settings.options);
       _ucontext = nullptr;
       _finished = true;
       break;
+    case WalkMode::multipleSig:
+      signalHandlerPartOfMultipleTraces(ucontext, settings.depth, settings.multipleOptions);
+      _ucontext = nullptr;
+      _finished = true;
+      break;
+    case WalkMode::multiple:
+    case WalkMode::multipleSep:
     case WalkMode::separateThread:
       {
         void* expected = nullptr;
+        if (settings.mode == WalkMode::multiple) {
+          // we also need to run ASGST in the signal handler
+          signalHandlerPartOfMultipleTraces(ucontext, settings.depth, settings.multipleOptions);
+        }
         if (!_ucontext.compare_exchange_strong(expected, ucontext) || _walkSettings == nullptr) {
             // another signal handler invocation is already in progress
             return;
@@ -453,25 +542,49 @@ static void signalHandler(int signum, siginfo_t *info, void *ucontext) {
   }
 }
 
+static void loopPartOfMultipleTraces(void *ucontext, jint depth, MultipleOptions *options) {
+  for (size_t i = 0; i < options->asgstSepThreadOptions.size(); i++) {
+    AsyncGetStackTrace(&_multipleTraces.asgstSepThreadTraces[i], depth, ucontext, options->asgstSepThreadOptions[i]);
+  }
+}
+
+
 void loop() {
   JNIEnv *env;
   jvm->AttachCurrentThreadAsDaemon((void**)&env, nullptr);
+  jvmti->GetCurrentThread(&loopThread);
+  registerThread(env, loopThread);
   while (!shouldStop) {
-    std::unique_lock<std::mutex> lk(_asgst_sep_m);
-    _asgst_sep_cv.wait(lk);
-    if (shouldStop) {
-      return;
+
+    while (!triggerLoopIteration) {
+      if (shouldStop) {
+        triggerLoopIteration = false;
+        return;
+      }
     }
+    triggerLoopIteration = false;
     WalkSettings settings = *_walkSettings.load();
-    sendSignal(settings.thread);
-    // wait for the stack to be walked, and block the thread from executing
-    // we do not timeout here, as this leads to difficult bugs
-    waitWhile([&](){ return _ucontext == nullptr;});
-    AsyncGetStackTrace(&_trace, settings.depth, (void*)_ucontext.load(), settings.options);
+
+    if (sendSignal(settings.thread)) {
+      // wait for the stack to be walked, and block the thread from executing
+      // we do not timeout here, as this leads to difficult bugs
+      waitWhile([&](){ return _ucontext == nullptr;});
+
+      switch (settings.mode) {
+        case WalkMode::multiple:
+        case WalkMode::multipleSep:
+          loopPartOfMultipleTraces((void*)_ucontext.load(), settings.depth, settings.multipleOptions);
+          break;
+        case WalkMode::separateThread:
+          AsyncGetStackTrace(&_trace, settings.depth, (void*)_ucontext.load(), settings.options);
+          break;
+        default:
+          break;
+      }
+    }
     _ucontext = nullptr;
+    _walkSettings = nullptr;
     _finished = true;
-    lk.unlock();
-    _asgst_sep_cv.notify_all();
   }
   jvm->DetachCurrentThread();
 }
@@ -479,12 +592,12 @@ void loop() {
 ASGCT_CallTrace* runASGCTInSignalHandler(JNIEnv *env, JNIEnv* threadEnv, pthread_t thread, jint depth) {
   _asgct_trace.frames = _asgct_frames;
   _asgct_trace.env_id = threadEnv;
-  WalkSettings settings{WalkMode::asgctSameThread, depth, 0, thread};
+  WalkSettings settings{WalkMode::asgctSameThread, nullptr, depth, 0, thread};
   _walkSettings = &settings;
   _finished = false;
   _ucontext = nullptr;
   if (!sendSignal(settings.thread)) {
-    fprintf(stderr, "failed to send signal to thread %ld\n", thread);
+    fprintf(stderr, "failed to send signal to thread\n");
     return nullptr;
   }
   waitWhile([&](){ return _finished == false;});
@@ -500,14 +613,12 @@ ASGST_CallTrace* runASGST(WalkSettings settings) {
     if (!sendSignal(settings.thread)) {
       return nullptr;
     }
-    waitWhile([&](){ return _finished == false;});
   } else if (settings.mode == WalkMode::separateThread) {
-    _asgst_sep_cv.notify_one();
-    std::unique_lock<std::mutex> lk{_asgst_sep_m};
-    _asgst_sep_cv.wait(lk, [&](){ return _finished == true;});
+    triggerLoopIteration = true;
   } else {
     throw std::runtime_error("unknown walk mode");
   }
+  waitWhile([&](){ return _finished == false;});
   return &_trace;
 }
 
@@ -518,11 +629,8 @@ ASGST_CallTrace* runASGST(WalkSettings settings) {
  */
 JNIEXPORT jobject JNICALL Java_tester_Tracer_runASGSTInSignalHandler
   (JNIEnv *env, jclass, jint options, jobject thread, jint depth) {
-  ASGST_CallTrace* trace = runASGST({WalkMode::sameThread, depth, options, getStateForJThread(env, thread).thread});
-  int app = countFirstTracerFrames(trace);
-  trace->num_frames -= app;
-  trace->frames += app;
-  return createTrace(env, trace);
+  ASGST_CallTrace* trace = runASGST({WalkMode::sameThread, nullptr, depth, options, getStateForJThread(env, thread).thread});
+  return createTraceWithoutTracerFrames(env, trace);
 }
 
 /*
@@ -532,11 +640,11 @@ JNIEXPORT jobject JNICALL Java_tester_Tracer_runASGSTInSignalHandler
  */
 JNIEXPORT jobject JNICALL Java_tester_Tracer_runASGSTInSeparateThread
   (JNIEnv *env, jclass, jint options, jobject thread, jint depth) {
-  ASGST_CallTrace* trace = runASGST({WalkMode::separateThread, depth, options, getStateForJThread(env, thread).thread});
+  ASGST_CallTrace* trace = runASGST({WalkMode::separateThread, nullptr, depth, options, getStateForJThread(env, thread).thread});
   int app = countFirstTracerFrames(trace);
   trace->num_frames -= app;
   trace->frames += app;
-  auto t = createTrace(env, trace);
+  auto t = createTraceWithoutTracerFrames(env, trace);
   return t;
 }
 
@@ -555,8 +663,40 @@ JNIEXPORT jobject JNICALL Java_tester_Tracer_runASGCTInSignalHandler
   int app = countFirstTracerFrames(trace);
   trace->num_frames -= app;
   trace->frames += app;
-  auto t = createTrace(env, trace);
+  auto t = createTraceWithoutTracerFrames(env, trace);
   return t;
+}
+
+JNIEXPORT jobjectArray JNICALL Java_tester_Tracer_runMultiple
+  (JNIEnv *env, jclass, jobject thread, jint depth, jboolean asgctSig,
+   jintArray asgstSepThreadOptions, jintArray asgstSigOptions) {
+  ThreadState state = getStateForJThread(env, thread);
+  MultipleOptions opts{asgctSig,
+      intArrayToVector(env, asgstSepThreadOptions), intArrayToVector(env, asgstSigOptions)};
+  WalkSettings settings{WalkMode::multiple,
+    &opts, depth, 0, state.thread};
+  _multipleTraces.init(state.env, settings.multipleOptions);
+  if (!settings.multipleOptions->needsSeparateThread() && settings.multipleOptions->needsSignalHandler()) {
+    settings.mode = WalkMode::multipleSig;
+    _finished = false;
+    _ucontext = nullptr;
+    _walkSettings = &settings;
+    if (!sendSignal(settings.thread)) {
+      return nullptr;
+    }
+  } else if (settings.multipleOptions->needsSeparateThread()) {
+    if (!settings.multipleOptions->needsSignalHandler()) {
+      settings.mode = WalkMode::multipleSep;
+    } else {
+      settings.mode = WalkMode::multiple;
+    }
+    _walkSettings = &settings;
+    triggerLoopIteration = true;
+    _finished = false;
+    _ucontext = nullptr;
+  }
+  waitWhile([&](){ return _finished == false;});
+  return _multipleTraces.toTraceArray(env);
 }
 
 jclass threadClass;
@@ -576,6 +716,17 @@ JNIEXPORT jobjectArray JNICALL Java_tester_Tracer_getThreads
   std::vector<jthread> threads_vec;
   for (int i = 0; i < threads_count; i++) {
     jthread thread = threads[i];
+    // is java thread?
+    jint state;
+    jvmti->GetThreadState(thread, &state);
+    if ((state & JVMTI_THREAD_STATE_ALIVE) == 0) {
+      // skip dead threads
+      continue;
+    }
+    if (loopThread == thread) {
+      // skip loop thread
+      continue;
+    }
     if (hasThreadState(thread)) {
       threads_vec.push_back(thread);
     }

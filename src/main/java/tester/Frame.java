@@ -167,14 +167,26 @@ public abstract class Frame {
          * assumes that method names are unique in every class
          */
         public Executable toExecutable() {
-            try {
-                String className = methodId.className.replace('/', '.').substring(1);
-                className = className.substring(0, className.length() - 1);
-                Class<?> clazz = Class.forName(className);
-                return Arrays.stream(clazz.getDeclaredMethods()).filter(m -> m.getName().equals(methodId.methodName)).findFirst().orElseThrow();
-            } catch (ClassNotFoundException e) {
-                throw new RuntimeException(e);
+            Class<?> clazz = getDeclaringClass();
+            if (clazz == null) {
+                return null;
             }
+            return Arrays.stream(clazz.getDeclaredMethods()).filter(m -> m.getName().equals(methodId.methodName)).findFirst().orElseThrow();
+        }
+
+        /**
+         * returns null or class
+         */
+        public Class<?> getDeclaringClass() {
+            String className = methodId.className.replace('/', '.').substring(1);
+            className = className.substring(0, className.length() - 1);
+            Class<?> clazz = null;
+            try {
+                clazz = Class.forName(className);
+            } catch (ClassNotFoundException e) {
+                return null;
+            }
+            return clazz;
         }
     }
 

@@ -2,11 +2,9 @@ package tester;
 
 import jdk.test.whitebox.WhiteBox;
 import org.testng.annotations.Test;
-import tester.Tracer.Options;
+import tester.Tracer.ConfiguredTrace;
 import tester.util.CompilationLevel;
 import tester.util.WhiteBoxUtil;
-
-import java.util.Arrays;
 
 import static org.testng.AssertJUnit.assertEquals;
 import static org.testng.AssertJUnit.assertTrue;
@@ -113,8 +111,65 @@ public class TracerTest {
     }
 
     @Test
+    public void testRunMultipleWithGST() {
+        new Tracer().runMultiple(Tracer.Configuration.gst()).get(0).trace().assertTrue(Frame.hasMethod(0,
+                "testRunMultipleWithGST"));
+    }
+
+    @Test
+    public void testRunMultipleWithASGCT() {
+        new Tracer().runMultiple(Tracer.Configuration.asgct()).get(0).trace().assertTrue(Frame.hasMethod(0,
+                "testRunMultipleWithASGCT"));
+    }
+
+    @Test
+    public void testRunMultipleWithASGST() {
+        new Tracer().runMultiple(Tracer.Configuration.asgst()).get(0).trace().assertTrue(Frame.hasMethod(0,
+                "testRunMultipleWithASGST"));
+    }
+
+
+    public static void main(String[] args) {
+        new TracerTest().testRunASGSTInSeparateThreadTwice();
+    }
+
+    @Test
+    public void testRunMultipleWithASGCTSig() {
+        new Tracer().runMultiple(Tracer.Configuration.asgctSignalHandler()).get(0).trace().assertTrue(Frame.hasMethod(0, "testRunMultipleWithASGCTSig"));
+    }
+
+    @Test
+    public void testRunMultipleWithASGSTSig() {
+        new Tracer().runMultiple(Tracer.Configuration.asgstSignalHandler()).get(0).trace().assertTrue(Frame.hasMethod(0, "testRunMultipleWithASGSTSig"));
+    }
+
+    @Test
+    public void testRunMultipleWithASGSTSepThread() {
+        new Tracer().runMultiple(Tracer.Configuration.asgstSeparateThread()).get(0).trace().assertTrue(Frame.hasMethod(0, "testRunMultipleWithASGSTSepThread"));
+    }
+
+    @Test
+    public void testRunASGSTInSeparateThreadTwice() {
+        testRunASGSTInSeparateThread();
+        testRunASGSTInSeparateThread();
+    }
+
+    @Test
+    public void testRunMultiple() {
+        for (ConfiguredTrace configuredTrace : new Tracer(Tracer.extensiveConfigs).runMultiple()) {
+            configuredTrace.trace().assertTrue(Frame.hasMethod(0, "testRunMultiple"));
+        }
+    }
+
+    @Test
     public void testRunAndCompare() {
         new Tracer().runAndCompare().assertTrue(Frame.hasMethod(0, "testRunAndCompare", "()V"));
+    }
+
+    @Test
+    public void testRunMultipleAndCompare() {
+        new Tracer(Tracer.extensiveConfigs).runMultipleAndCompare().assertTrue(Frame.hasMethod(0,
+                "testRunMultipleAndCompare", "()V"));
     }
 
     /**
@@ -140,12 +195,15 @@ public class TracerTest {
 
     private boolean innerBasicWhiteBoxCompileTest() throws NoSuchMethodException {
         new Tracer().runAndCompare().assertTrue(Frame.matchesExecutable(0, TracerTest.class.getDeclaredMethod(
-                "innerBasicWhiteBoxCompileTest")).hasCompilationLevel(innerBasicWhiteBoxCompileTestCompLevel),
+                        "innerBasicWhiteBoxCompileTest")).hasCompilationLevel(innerBasicWhiteBoxCompileTestCompLevel),
                 Frame.hasMethod(1, "testBasicWhiteBoxCompileTest"));
         return true;
     }
 
-    public static void main(String[] args) throws Exception {
-
+    @Test(timeOut = 1000)
+    public void testASGSTSeparateThreadMultipleRuns() {
+        for (int i = 0; i < 10; i++) {
+            testRunASGSTInSeparateThread();
+        }
     }
 }

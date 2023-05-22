@@ -3,15 +3,14 @@ package tester;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 import picocli.CommandLine.Option;
-import tester.JNIHelper;
-import tester.Tracer;
+import tester.Frame.JavaFrame;
+import tester.Frame.MethodId;
 import tester.Tracer.Configuration;
+import tester.util.WhiteBoxUtil;
 
 import java.lang.instrument.Instrumentation;
-import java.time.Duration;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import java.lang.reflect.Executable;
+import java.util.*;
 
 /**
  * An agent that walks threads, comparing the output of the different APIs.
@@ -25,26 +24,82 @@ public class Agent implements Runnable {
     }
 
     @Option(names = "--gst", description = "compare with GetStackTrace, triggers safe-points")
-    private boolean compareWithGST = false;
+    private final boolean compareWithGST = false;
 
     /**
      * only include the in signal handler versions with no C frames
      */
     @Option(names = "--basic", description = "only include the in signal handler versions with no C frames")
-    private boolean basic = false;
+    private final boolean basic = false;
 
     @Option(names = "--max-threads", description = "maximum number of threads to walk per iteration")
-    private int maxThreadsPerIteration = 10;
+    private final int maxThreadsPerIteration = 10;
 
     @Option(names = {"--sample-interval", "-i"}, description = "sample interval in seconds")
     private float sampleInterval = 0.001f;
 
-    @Option(names = {"--randomize", "-r"}, description = "randomize compilation levels and inlining every N seconds " +
-            "(0 to disable), checks that ASGST returns the correct information per method")
-    private float randomizeCompLevelsInterval = 0;
-
     private long success = 0;
     private long fail = 0;
+
+    private final Random random = new Random();
+    private boolean shouldCollectMethodNames = false;
+
+
+    /**
+     * methods that have been executed and found during the sampling, used for compilation level randomization
+     */
+    private final Map<MethodId, Executable> executedMethods = new HashMap<>();
+
+    public Agent(float sampleInterval, boolean shouldCollectMethods) {
+        this.sampleInterval = sampleInterval;
+        this.shouldCollectMethodNames = shouldCollectMethods;
+    }
+
+    public Agent(float sampleInterval) {
+        this.sampleInterval = sampleInterval;
+    }
+
+    public Agent() {
+    }
+
+    private void collectMethodNames(Trace trace) {
+        for (Frame frame : trace) {
+            if (frame instanceof JavaFrame f && !f.isNative()) {
+                if (executedMethods.containsKey(f.methodId)) {
+                    continue;
+                }
+                Class<?> clazz = f.getDeclaringClass();
+                if (clazz == null) {
+                    continue;
+                }
+                Executable[] possibleMethods =
+                        (f.methodId.methodName.equals("<init>") ? Arrays.stream(clazz.getDeclaredConstructors()) :
+                                Arrays.stream(clazz.getDeclaredMethods()).filter(m -> m.getName().equals(f.methodId.methodName)))
+                                .toArray(Executable[]::new);
+                if (possibleMethods.length == 1) {
+                    executedMethods.put(f.methodId, possibleMethods[0]);
+                } else {
+                    if (possibleMethods.length > 1) {
+                        System.err.println("[Agent] Skipping method " + f.methodId + " because it is not unique in " +
+                                "its class");
+                    } else {
+                        System.err.println("[Agent] Skipping method " + f.methodId + " because it was not found in " +
+                                "its class");
+                    }
+                }
+            }
+        }
+    }
+
+    public void randomizeCompilationLevels() {
+        if (executedMethods.isEmpty()) {
+            return;
+        }
+        System.out.printf("[Agent] Randomizing compilation levels for %d methods%n", executedMethods.size());
+        var levels = WhiteBoxUtil.createRandomCompilationLevels(random, executedMethods.values().stream().toList());
+        WhiteBoxUtil.forceCompilationLevels(levels);
+        System.out.println("[Agent] Done randomizing compilation levels");
+    }
 
     private List<Thread> selectThreads() {
         Thread[] threads = Tracer.getThreads();
@@ -54,9 +109,10 @@ public class Agent implements Runnable {
         return threadList.subList(0, Math.min(maxThreadsPerIteration, threadList.size()));
     }
 
-    private Tracer createTracer() {
-        List<Configuration> configurations = new ArrayList<>(basic ? Tracer.basicSeperateThreadConfigs :
-                Tracer.extensiveConfigs);
+    protected Tracer createTracer() {
+        // separate thread is not supported for basic
+        List<Configuration> configurations = new ArrayList<>(basic ? Tracer.basicSeparateThreadConfigs :
+                Tracer.extensiveSpecificThreadConfigs);
         if (!compareWithGST) {
             configurations.removeIf(c -> c.mode() == Tracer.Mode.GST);
         }
@@ -71,15 +127,21 @@ public class Agent implements Runnable {
         }
         for (Thread t : threads) {
             try {
-                //System.err.println("[Agent] Walking " + t.getName());
-                System.out.println(new Tracer(Tracer.Configuration.asgctSignalHandler()).runAndCompare(t).size());
-               // System.err.println("[Agent] [" + t.getName() + "] success: " + success + " fail: " + fail);
+                if (!t.isAlive() || t.isDaemon()) {
+                    continue;
+                }
+                Trace trace = tracer.runMultipleAndCompare(t);
+                if (shouldCollectMethodNames) {
+                    collectMethodNames(trace);
+                }
                 success++;
+
             } catch (AssertionError e) {
                 e.printStackTrace();
                 fail++;
             }
         }
+        System.err.println(" success: " + success + " fail: " + fail);
     }
 
     private volatile boolean stop = false;
@@ -99,12 +161,10 @@ public class Agent implements Runnable {
     private void loop() {
         Tracer tracer = createTracer();
         while (!stop) {
-            System.out.print("+");
             var start = time();
             iteration(tracer);
             var elapsed = time() - start;
             var sleep = Math.max(0, sampleInterval - elapsed);
-            System.out.println("[Agent] " + sleep + " took " + elapsed);
             if (sleep > 0) {
                 sleep(sleep);
             }

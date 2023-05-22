@@ -51,7 +51,7 @@ public class ModifiedCompilationLevelTest {
         trialRun = true;
         methods =
                 Arrays.stream(ModifiedCompilationLevelTest.class.getDeclaredMethods()).filter(m -> m.getName().startsWith(
-                "method")).collect(Collectors.toMap(Executable::getName, m -> m));
+                        "method")).collect(Collectors.toMap(Executable::getName, m -> m));
         // force methods to be interpreted
         method1();
         WhiteBoxUtil.forceCompilationLevels(methods.entrySet().stream().collect(Collectors.toMap(Map.Entry::getValue,
@@ -90,10 +90,10 @@ public class ModifiedCompilationLevelTest {
             ranMethod4 = true;
             var compLevels = methods.entrySet().stream().collect(Collectors.toMap(Map.Entry::getValue,
                     e -> switch (e.getKey()) {
-                case "method2" -> CompilationLevelAndInlining.COMPILED_NOT_INLINED;
-                case "method3" -> CompilationLevelAndInlining.COMPILED_INLINED;
-                default -> CompilationLevelAndInlining.INTERPRETED;
-            }));
+                        case "method2" -> CompilationLevelAndInlining.COMPILED_NOT_INLINED;
+                        case "method3" -> CompilationLevelAndInlining.COMPILED_INLINED;
+                        default -> CompilationLevelAndInlining.INTERPRETED;
+                    }));
             WhiteBoxUtil.forceCompilationLevels(compLevels);
             method1();
         }

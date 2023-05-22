@@ -381,9 +381,14 @@ public class CompilerDirectives {
         return new DirectiveBlockBuilder(Arrays.asList(patterns));
     }
 
+    public static String methodToPattern(Executable method) {
+        return "%s::%s(%s)".formatted(method.getDeclaringClass().getName(), method.getName(),
+                Arrays.stream(method.getParameterTypes()).map(Class::getName)
+                .collect(Collectors.joining(";")));
+    }
+
     public static DirectiveBlockBuilder matches(List<Executable> methods) {
-        return new DirectiveBlockBuilder(methods.stream().map(m -> "%s::%s(%s)".formatted(m.getDeclaringClass().getName(), m.getName(), Arrays.stream(m.getParameterTypes()).map(Class::getName) // require byte code names
-                .collect(Collectors.joining(",")))).collect(Collectors.toList()));
+        return new DirectiveBlockBuilder(methods.stream().map(CompilerDirectives::methodToPattern).collect(Collectors.toList()));
     }
 
     public static DirectiveBlockBuilder matches(Executable... methods) {
@@ -433,7 +438,6 @@ public class CompilerDirectives {
     public static void main(String[] args) {
         var com = new CompilerDirectives();
         com.add(matches(CompilerDirectives.class.getMethods()[0]).noInline().compile(Compiler.C1));
-        System.out.println(com);
         com.apply();
     }
 }

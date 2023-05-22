@@ -10,6 +10,8 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static tester.util.CompilerDirectives.matches;
+
 public class WhiteBoxUtil {
 
     /**
@@ -65,8 +67,8 @@ public class WhiteBoxUtil {
             }
         });
         CompilerDirectives.of(
-                CompilerDirectives.matches(inlinedMethods).inline(),
-                CompilerDirectives.matches(notInlinedMethods).noInline()).apply();
+                matches(inlinedMethods).inline(),
+                matches(notInlinedMethods).noInline()).apply();
         levels.forEach((m, level) -> {
             int currentLevel = wb.getMethodCompilationLevel(m);
             if (currentLevel == level.level()) {
@@ -123,10 +125,6 @@ public class WhiteBoxUtil {
             }
             return Frame.matchesExecutable(i, m).hasCompilationLevel(level).isNotInlined();
         }).toArray(Pair[]::new);
-        System.out.println("comp level matchers");
-        for (var p : res) {
-            System.out.println("         " + p);
-        }
         return res;
     }
 

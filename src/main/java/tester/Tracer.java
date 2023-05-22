@@ -15,19 +15,15 @@ import static tester.util.ListUtils.combine;
 public class Tracer {
 
     enum API {
-        GST,
-        ASGCT,
-        ASGST
+        GST, ASGCT, ASGST
     }
 
     /**
      * sampling mode
      */
     public enum Mode {
-        GST(API.GST, "gst", 0, true),
-        ASGCT(API.ASGCT, "asgct", 0, false),
-        ASGCT_SIGNAL_HANDLER(API.ASGCT, "asgct_signal", 0, true),
-        ASGST(API.ASGST, "asgst_jni", ASGST_WALK_SAME_THREAD, false),
+        GST(API.GST, "gst", 0, true), ASGCT(API.ASGCT, "asgct", 0, false), ASGCT_SIGNAL_HANDLER(API.ASGCT,
+                "asgct_signal", 0, true), ASGST(API.ASGST, "asgst_jni", ASGST_WALK_SAME_THREAD, false),
         ASGST_SIGNAL_HANDLER(API.ASGST, "asgst_signal", ASGST_WALK_SAME_THREAD, true),
         ASGST_SEPARATE_THREAD(API.ASGST, "asgst_separate", 0, true);
 
@@ -191,82 +187,58 @@ public class Tracer {
         }
     }
 
-    public static final List<Configuration> nonJavaThreadEnableConfig = List.of(
-            Configuration.asgst().includeCFrames().includeNonJavaThreads(),
-            Configuration.asgstSignalHandler().includeCFrames().includeNonJavaThreads(),
-            Configuration.asgstSeparateThread().includeCFrames().includeNonJavaThreads()
-    );
+    public static final List<Configuration> nonJavaThreadEnableConfig =
+            List.of(Configuration.asgst().includeCFrames().includeNonJavaThreads(),
+                    Configuration.asgstSignalHandler().includeCFrames().includeNonJavaThreads(),
+                    Configuration.asgstSeparateThread().includeCFrames().includeNonJavaThreads());
 
     /**
      * Full list of ASGST related configurations
      */
-    public static final List<Configuration> extensiveASGSTConfigs = List.of(
-            Configuration.asgst(),
+    public static final List<Configuration> extensiveASGSTConfigs = List.of(Configuration.asgst(),
             Configuration.asgst().includeNonJavaThreads().includeWalkDuringUnsafeStates(),
-            Configuration.asgst().includeCFrames(),
-            Configuration.asgstSignalHandler(),
+            Configuration.asgst().includeCFrames(), Configuration.asgstSignalHandler(),
             Configuration.asgstSignalHandler().includeNonJavaThreads().includeWalkDuringUnsafeStates(),
             Configuration.asgstSignalHandler().includeCFrames(),
-            Configuration.asgstSignalHandler().includeNonJavaThreads().includeCFrames().includeWalkDuringUnsafeStates(),
-            Configuration.asgstSeparateThread().includeNonJavaThreads().includeWalkDuringUnsafeStates(),
-            Configuration.asgstSeparateThread().includeCFrames(),
-            Configuration.asgstSeparateThread().includeNonJavaThreads().includeCFrames().includeWalkDuringUnsafeStates()
-    );
+            Configuration.asgstSignalHandler().includeNonJavaThreads().includeCFrames().includeWalkDuringUnsafeStates(), Configuration.asgstSeparateThread().includeNonJavaThreads().includeWalkDuringUnsafeStates(), Configuration.asgstSeparateThread().includeCFrames(), Configuration.asgstSeparateThread().includeNonJavaThreads().includeCFrames().includeWalkDuringUnsafeStates());
 
-    public static final List<Configuration> extensiveNonCASGSTConfigs = extensiveASGSTConfigs.stream()
-            .filter(c -> !c.doesIncludeCFrames())
-            .collect(Collectors.toList());
+    public static final List<Configuration> extensiveNonCASGSTConfigs =
+            extensiveASGSTConfigs.stream().filter(c -> !c.doesIncludeCFrames()).collect(Collectors.toList());
 
     /**
      * Basic list of ASGST related configurations which include C frames
      */
-    public static final List<Configuration> asgstCFrameConfigs = List.of(
-            Configuration.asgst().includeCFrames(),
-            Configuration.asgstSignalHandler().includeCFrames(),
-            Configuration.asgstSeparateThread().includeCFrames()
-    );
+    public static final List<Configuration> asgstCFrameConfigs = List.of(Configuration.asgst().includeCFrames(),
+            Configuration.asgstSignalHandler().includeCFrames(), Configuration.asgstSeparateThread().includeCFrames());
 
 
     /**
      * All modes available
      */
-    public static final List<Configuration> extensiveConfigs = combine(List.of(
-            Configuration.gst(),
-            Configuration.asgct(),
-            Configuration.asgctSignalHandler()
-    ), extensiveASGSTConfigs);
+    public static final List<Configuration> extensiveConfigs = combine(List.of(Configuration.gst(),
+            Configuration.asgct(), Configuration.asgctSignalHandler()), extensiveASGSTConfigs);
 
-    public static final List<Configuration> extensiveNonCConfigs = extensiveConfigs.stream()
-            .filter(c -> !c.doesIncludeCFrames())
-            .collect(Collectors.toList());
+    public static final List<Configuration> extensiveNonCConfigs =
+            extensiveConfigs.stream().filter(c -> !c.doesIncludeCFrames()).collect(Collectors.toList());
 
-    public static final List<Configuration> extensiveCConfigs = extensiveConfigs.stream()
-            .filter(Configuration::doesIncludeCFrames)
-            .collect(Collectors.toList());
+    public static final List<Configuration> extensiveCConfigs =
+            extensiveConfigs.stream().filter(Configuration::doesIncludeCFrames).collect(Collectors.toList());
 
-    public static final List<Configuration> basicJavaConfigs = List.of(
-            Configuration.gst(),
-            Configuration.asgct(),
-            Configuration.asgctSignalHandler(),
-            Configuration.asgst(),
-            Configuration.asgstSignalHandler(),
-            Configuration.asgstSeparateThread()
-    );
+    public static final List<Configuration> basicJavaConfigs = List.of(Configuration.gst(), Configuration.asgct(),
+            Configuration.asgctSignalHandler(), Configuration.asgst(), Configuration.asgstSignalHandler(),
+            Configuration.asgstSeparateThread());
 
-    public static final List<Configuration> nonASGSTConfigs = List.of(
-            Configuration.gst(),
-            Configuration.asgct()
-    );
+    public static final List<Configuration> nonASGSTConfigs = List.of(Configuration.gst(), Configuration.asgct());
 
-    public static final List<Configuration> extensiveSpecificThreadConfigs = extensiveConfigs.stream()
-            .filter(c -> c.mode.supportSpecificThread)
-            .collect(Collectors.toList());
+    /**
+     * excludes GetStackTrace configs as they trigger safe-points, making it impossible to run on the same
+     * JVM state as AsyncGetCallTrace and AsyncGetStackTrace
+     */
+    public static final List<Configuration> extensiveSpecificThreadConfigs =
+            extensiveConfigs.stream().filter(c -> c.mode.supportSpecificThread && c.mode != Mode.GST).collect(Collectors.toList());
 
-    public static final List<Configuration> basicSeperateThreadConfigs = List.of(
-            Configuration.gst(),
-            Configuration.asgctSignalHandler(),
-            Configuration.asgstSignalHandler()
-    );
+    public static final List<Configuration> basicSeparateThreadConfigs = List.of(Configuration.gst(),
+            Configuration.asgctSignalHandler(), Configuration.asgstSignalHandler());
     public final static List<Configuration> defaultConfigs = extensiveConfigs;
 
     private final List<Configuration> configurations;
@@ -475,18 +447,90 @@ public class Tracer {
             boolean ignoreNonJavaFrames = !a.trace.hasNonJavaFrames() || !b.trace.hasNonJavaFrames();
             Trace af = ignoreNonJavaFrames ? a.trace.withoutNonJavaFrames() : a.trace;
             Trace bf = ignoreNonJavaFrames ? b.trace.withoutNonJavaFrames() : b.trace;
-            List<Integer> unequalIndexes = IntStream.range(0, Math.max(af.size(), bf.size()))
-                    .filter(i -> i >= af.size() || i >= bf.size() || !af.get(i).equals(bf.get(i)))
-                    .boxed()
-                    .toList();
+            List<Integer> unequalIndexes =
+                    IntStream.range(0, Math.max(af.size(), bf.size())).filter(i -> i >= af.size() || i >= bf.size() || !af.get(i).equals(bf.get(i))).boxed().toList();
             List<String> lines = new ArrayList<>();
             unequalIndexes.forEach(i -> {
                 lines.add("at %d: %s != %s\n".formatted(i, i >= af.size() ? "null" : af.get(i), i >= bf.size() ?
                         "null" : bf.get(i)));
             });
-            return "Traces unequal (%s vs %s):\n".formatted(a.config, b.config) + String.join("", lines) + a + "\n" + b;
+            return "Traces unequal (%s vs %s):\n".formatted(a.config.toLongString(), b.config.toLongString()) + String.join("", lines) + a + "\n" + b;
         }
     }
+
+    public List<ConfiguredTrace> runMultiple() {
+        return runMultiple(configurations, depth, null);
+    }
+
+    public List<ConfiguredTrace> runMultiple(Configuration... configs) {
+        return runMultiple(List.of(configs), depth, null);
+    }
+
+    public List<ConfiguredTrace> runMultiple(List<Configuration> configs, Thread thread) {
+        return runMultiple(configs, depth, thread);
+    }
+
+    /**
+     * combines all calls, so that the thread is walked by all methods at the same point of its execution
+     */
+    public static List<ConfiguredTrace> runMultiple(List<Configuration> configs, int depth, Thread thread) {
+        Thread _thread = thread == null ? Thread.currentThread() : thread;
+        boolean sameThread = Thread.currentThread() == _thread;
+        boolean hasGST = configs.stream().anyMatch(c -> c.mode == Mode.GST);
+        if (hasGST && !sameThread) {
+            throw new IllegalArgumentException("GST can only be used with the same thread");
+        }
+        boolean hasASGCT = configs.stream().anyMatch(c -> c.mode == Mode.ASGCT);
+        boolean hasASGCTSig = configs.stream().anyMatch(c -> c.mode == Mode.ASGCT_SIGNAL_HANDLER);
+        int[] asgstOptions = configs.stream().filter(c -> c.mode == Mode.ASGST).mapToInt(c -> c.options).toArray();
+        int[] asgstSepThreadOptions =
+                configs.stream().filter(c -> c.mode == Mode.ASGST_SEPARATE_THREAD).mapToInt(c -> c.options).toArray();
+        int[] asgstSigOptions =
+                configs.stream().filter(c -> c.mode == Mode.ASGST_SIGNAL_HANDLER).mapToInt(c -> c.options).toArray();
+        Trace[] traces;
+        if (hasASGCTSig || asgstSepThreadOptions.length > 0 || asgstSigOptions.length > 0) {
+            traces = runMultiple(_thread, depth, hasASGCTSig, asgstSepThreadOptions, asgstSigOptions);
+        } else {
+            traces = new Trace[0];
+        }
+        if (!sameThread && (hasASGCT || asgstOptions.length > 0)) {
+            throw new IllegalStateException("ASGCT and ASGST (non sig or sep thread) can only be run on the current " + "thread");
+        }
+        List<ConfiguredTrace> confTraces = new ArrayList<>();
+        int asgstSepThreadIndex = 0;
+        int asgstSigIndex = 0;
+        for (var c : configs) {
+            switch (c.mode) {
+                case GST -> confTraces.add(new ConfiguredTrace(c, runGST(c.thread, depth)));
+                case ASGCT -> confTraces.add(new ConfiguredTrace(c, runASGCT(depth)));
+                case ASGCT_SIGNAL_HANDLER -> confTraces.add(new ConfiguredTrace(c, traces[0]));
+                case ASGST -> confTraces.add(new ConfiguredTrace(c, runASGST(c.options, depth)));
+                case ASGST_SEPARATE_THREAD -> confTraces.add(new ConfiguredTrace(c, traces[1 + asgstSepThreadIndex++]));
+                case ASGST_SIGNAL_HANDLER ->
+                        confTraces.add(new ConfiguredTrace(c,
+                                traces[1 + asgstSepThreadOptions.length + asgstSigIndex++]));
+            }
+        }
+        return confTraces;
+    }
+
+    public Trace runMultipleAndCompare() {
+        return compare(runMultiple());
+    }
+
+    public Trace runMultipleAndCompare(Thread thread) {
+        return runMultipleAndCompare(configurations, thread);
+    }
+
+    public Trace runMultipleAndCompare(List<Configuration> configs, Thread thread) {
+        return compare(runMultiple(configs, thread));
+    }
+
+    /**
+     * returns [asgct sig or null, asgst..., asgst...]
+     */
+    private static native Trace[] runMultiple(Thread thread, int depth, boolean asgctSig, int[] asgstSepThreadOptions
+            , int[] asgstSigOptions);
 
     /**
      * walk the current stack using the given configs, throws an error
@@ -497,10 +541,15 @@ public class Tracer {
      */
     private Trace runAndCompare(List<Configuration> configs, int depth, Thread thread) {
         assert configs != null && configs.size() > 0;
-        var confTraces =
-                configs.stream().map(config -> new ConfiguredTrace(config, run(config, depth, thread))).toList();
-        var first = confTraces.stream().max(Comparator.comparingInt(a -> a.trace.size())).orElseThrow();
-        for (var other : confTraces) {
+        var confTraces = thread == null || thread.equals(Thread.currentThread()) ?
+                configs.stream().map(config -> new ConfiguredTrace(config, run(config, depth, thread))).toList() :
+                runMultiple(configs, depth, thread);
+        return compare(confTraces);
+    }
+
+    public Trace compare(List<ConfiguredTrace> traces) {
+        var first = traces.stream().max(Comparator.comparingInt(a -> a.trace.size())).orElseThrow();
+        for (var other : traces) {
             if (other != first) {
                 first.checkEquality(other);
             }

@@ -140,6 +140,14 @@ jobject createTrace(JNIEnv *env, ASGCT_CallTrace *trace) {
   }
 }
 
+jobject createTraceWithoutTracerFrames(JNIEnv *env, ASGCT_CallTrace *trace) {
+  int app = countFirstTracerFrames(trace);
+  ASGCT_CallTrace copy = *trace;
+  copy.frames += app;
+  copy.num_frames -= app;
+  return createTrace(env, &copy);
+}
+
 jobject createJavaFrame(JNIEnv *env, jvmtiFrameInfo *frame) {
   if (frame->location < 0) {
     return createGSTNativeFrame(env, frame->method);
@@ -164,6 +172,11 @@ jobject createTrace(JNIEnv *env, jvmtiFrameInfo *frame, int length) {
     std::cerr << "Exception in createTrace: " << e.what() << std::endl;
     return nullptr;
   }
+}
+
+jobject createTraceWithoutTracerFrames(JNIEnv *env, jvmtiFrameInfo *frame, int length) {
+  int app = countFirstTracerFrames(frame, length);
+  return createTrace(env, frame + app, length - app);
 }
 
 jobject createJavaFrame(JNIEnv *env, ASGST_JavaFrame *frame) {
@@ -229,5 +242,13 @@ jobject createTrace(JNIEnv *env, ASGST_CallTrace *trace) {
     std::cerr << "Exception in createTrace: " << e.what() << std::endl;
     return nullptr;
   }
+}
+
+jobject createTraceWithoutTracerFrames(JNIEnv *env, ASGST_CallTrace *trace) {
+  int app = countFirstTracerFrames(trace);
+  ASGST_CallTrace copy = *trace;
+  copy.frames += app;
+  copy.num_frames -= app;
+  return createTrace(env, &copy);
 }
 
