@@ -94,7 +94,7 @@ jobject createGSTNativeFrame(JNIEnv *env, jmethodID method_id) {
 }
 
 jobject createJavaFrame(JNIEnv *env, ASGCT_CallFrame *frame) {
-  if (frame->lineno < 0) {
+  if (frame->lineno == -3) {
     return createASGCTNativeFrame(env, frame->method_id);
   }
   return createASGCTJavaFrame(env, frame->method_id, frame->lineno);
@@ -119,20 +119,20 @@ jobject createTrace(JNIEnv *env, ASGCT_CallTrace *trace) {
   try {
     jclass clazz = findClass(env, javaTraceClass, "tester/Trace");
     if (trace->num_frames < 0) {
-      jmethodID constructor = findMethod(env, javaTraceClassErrorConstructor, clazz, "<init>", "(II)V");
-      return env->NewObject(clazz, constructor, 0 /* JAVA_TRACE */, trace->num_frames);
+      jmethodID constructor = findMethod(env, javaTraceClassErrorConstructor, clazz, "<init>", "(III)V");
+      return env->NewObject(clazz, constructor, ASGST_JAVA_TRACE, -1, trace->num_frames);
     }
     try {
-      jmethodID constructor = findMethod(env, javaTraceClassConstructor, clazz, "<init>", "(I[Ltester/Frame;)V");
+      jmethodID constructor = findMethod(env, javaTraceClassConstructor, clazz, "<init>", "(II[Ltester/Frame;)V");
       jobjectArray frames = env->NewObjectArray(trace->num_frames, findClass(env, javaFrameClass, "tester/Frame$JavaFrame"), nullptr);
       for (int i = 0; i < trace->num_frames; i++) {
         env->SetObjectArrayElement(frames, i, createJavaFrame(env, &trace->frames[i]));
       }
-      return env->NewObject(clazz, constructor, ASGST_JAVA_TRACE, frames);
+      return env->NewObject(clazz, constructor, ASGST_JAVA_TRACE, -1, frames);
     } catch (const std::runtime_error &e) {
       std::cerr << "Exception in createTrace: " << e.what() << std::endl;
-      jmethodID constructor = findMethod(env, javaTraceClassErrorConstructor, clazz, "<init>", "(II)V");
-      return env->NewObject(clazz, constructor, 0 /* JAVA_TRACE */, -100);
+      jmethodID constructor = findMethod(env, javaTraceClassErrorConstructor, clazz, "<init>", "(III)V");
+      return env->NewObject(clazz, constructor, ASGST_JAVA_TRACE, -100);
     }
   } catch (std::runtime_error &e) {
     std::cerr << "Exception in createTrace: " << e.what() << std::endl;
@@ -149,7 +149,7 @@ jobject createTraceWithoutTracerFrames(JNIEnv *env, ASGCT_CallTrace *trace) {
 }
 
 jobject createJavaFrame(JNIEnv *env, jvmtiFrameInfo *frame) {
-  if (frame->location < 0) {
+  if (frame->location == -1) {
     return createGSTNativeFrame(env, frame->method);
   }
   return createGSTJavaFrame(env, frame->method, frame->location);
@@ -162,12 +162,12 @@ int countFirstTracerFrames(jvmtiFrameInfo *frame, int length) {
 jobject createTrace(JNIEnv *env, jvmtiFrameInfo *frame, int length) {
   try {
     jclass clazz = findClass(env, javaTraceClass, "tester/Trace");
-    jmethodID constructor = findMethod(env, javaTraceClassConstructor, clazz, "<init>", "(I[Ltester/Frame;)V");
+    jmethodID constructor = findMethod(env, javaTraceClassConstructor, clazz, "<init>", "(II[Ltester/Frame;)V");
     jobjectArray frames = env->NewObjectArray(length, findClass(env, javaFrameClass, "tester/Frame$JavaFrame"), nullptr);
     for (int i = 0; i < length; i++) {
       env->SetObjectArrayElement(frames, i, createJavaFrame(env, frame + i));
     }
-    return env->NewObject(clazz, constructor, ASGST_JAVA_TRACE, frames);
+    return env->NewObject(clazz, constructor, ASGST_JAVA_TRACE, -1, frames);
   } catch (std::runtime_error &e) {
     std::cerr << "Exception in createTrace: " << e.what() << std::endl;
     return nullptr;
@@ -183,7 +183,7 @@ jobject createJavaFrame(JNIEnv *env, ASGST_JavaFrame *frame) {
   jclass frameClass = findClass(env, javaFrameClass, "tester/Frame$JavaFrame");
   jmethodID frameConstructor = findMethod(env, javaFrameClassConstructor, frameClass, "<init>", "(IIILtester/Frame$MethodId;)V");
   jobject methodId = createMethodId(env, frame->method_id);
-  return env->NewObject(frameClass, frameConstructor, frame->type, frame->comp_level, frame->bci, methodId);
+  return env->NewObject(frameClass, frameConstructor, frame->type, frame->comp_level, frame->bci == 65535 ? -1 : frame->bci, methodId);
 }
 
 jobject createNonJavaFrame(JNIEnv *env, ASGST_NonJavaFrame *frame) {
@@ -228,16 +228,16 @@ jobject createTrace(JNIEnv *env, ASGST_CallTrace *trace) {
   try {
     jclass clazz = findClass(env, javaTraceClass, "tester/Trace");
     if (trace->num_frames < 0) {
-      jmethodID constructor = findMethod(env, javaTraceClassErrorConstructor, clazz, "<init>", "(II)V");
-      return env->NewObject(clazz, constructor, trace->kind, trace->num_frames);
+      jmethodID constructor = findMethod(env, javaTraceClassErrorConstructor, clazz, "<init>", "(III)V");
+      return env->NewObject(clazz, constructor, trace->kind, trace->state, trace->num_frames);
     }
-    jmethodID constructor = findMethod(env, javaTraceClassConstructor, clazz, "<init>", "(I[Ltester/Frame;)V");
+    jmethodID constructor = findMethod(env, javaTraceClassConstructor, clazz, "<init>", "(II[Ltester/Frame;)V");
     jobjectArray frames = env->NewObjectArray(trace->num_frames, findClass(env, frameBaseClass, "tester/Frame"), nullptr);
     for (int i = 0; i < trace->num_frames; i++) {
       auto f = createFrame(env, &trace->frames[i]);
       env->SetObjectArrayElement(frames, i, f);
     }
-    return env->NewObject(clazz, constructor, trace->kind, frames);
+    return env->NewObject(clazz, constructor, trace->kind, trace->state, frames);
   } catch (std::runtime_error &e) {
     std::cerr << "Exception in createTrace: " << e.what() << std::endl;
     return nullptr;

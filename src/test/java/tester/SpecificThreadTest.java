@@ -60,8 +60,7 @@ public class SpecificThreadTest {
 
     @Test
     public void compareTest() throws Exception {
-        withDoSomethingThread(t -> new Tracer(Tracer.extensiveSpecificThreadConfigs).runAndCompare(t)
-                .withoutNonJavaFrames());
+        withDoSomethingThread(t -> new Tracer(Tracer.extensiveSpecificThreadConfigs).runAndCompare(t).withoutNonJavaFrames());
     }
 
     @Test(timeOut = 10000)

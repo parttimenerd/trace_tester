@@ -13,16 +13,18 @@ import java.util.stream.Stream;
 
 public class Trace extends AbstractList<Frame> {
 
-    public static final int JAVA_TRACE = 0;
-    public static final int CPP_TRACE = 1;
+    public static final int JAVA_TRACE = 1;
+    public static final int CPP_TRACE = 2;
 
-    public static final int GC_TRACE = 2;
+    public static final int GC_TRACE = 4;
 
-    public static final int DEOPT_TRACE = 3;
+    public static final int DEOPT_TRACE = 8;
 
-    public static final int UNKNOWN_TRACE = 4;
+    public static final int UNKNOWN_TRACE = 16;
 
     final int kind;
+
+    final int state;
 
     final List<Frame> frames;
 
@@ -31,20 +33,22 @@ public class Trace extends AbstractList<Frame> {
      */
     private final int errorCode;
 
-    public Trace(int kind, Frame[] frames) {
-        this(kind, List.of(frames));
+    public Trace(int kind, int state, Frame[] frames) {
+        this(kind, state, List.of(frames));
     }
 
-    public Trace(int kind, List<Frame> frames) {
+    public Trace(int kind, int state, List<Frame> frames) {
         this.kind = kind;
+        this.state = state;
         this.frames = frames;
         this.errorCode = 0;
     }
 
-    public Trace(int kind, int errorCode) {
+    public Trace(int kind, int state, int errorCode) {
         this.frames = List.of();
         this.errorCode = errorCode;
         this.kind = kind;
+        this.state = state;
     }
 
     public boolean hasError() {
@@ -73,11 +77,11 @@ public class Trace extends AbstractList<Frame> {
     @Override
     public String toString() {
         if (hasError()) {
-            return "Trace{" +
+            return "Trace[" +
                     "errorCode=" + errorCode +
-                    '}';
+                    ']';
         }
-        return "Trace:" + frames.stream().map(f -> "\n" + f.toString()).collect(Collectors.joining(""));
+        return "Trace[length=%d,kind=%d,state=%d]:".formatted(size(), kind, state) + frames.stream().map(f -> "\n  " + f.toString()).collect(Collectors.joining(""));
     }
 
     @Override
@@ -107,9 +111,10 @@ public class Trace extends AbstractList<Frame> {
     public Trace withoutNonJavaFrames() {
         if (_withoutNonJavaFrames == null) {
             if (kind != JAVA_TRACE) {
-                _withoutNonJavaFrames = new Trace(kind, 0);
+                _withoutNonJavaFrames = new Trace(kind, state, 0);
             } else if (hasNonJavaFrames()) {
-                _withoutNonJavaFrames = new Trace(kind, frames.stream().filter(f -> f.type != Frame.CPP).toList());
+                _withoutNonJavaFrames = new Trace(kind, state,
+                        frames.stream().filter(f -> f.type != Frame.CPP).toList());
             } else {
                 _withoutNonJavaFrames = this;
             }
@@ -117,7 +122,21 @@ public class Trace extends AbstractList<Frame> {
         return _withoutNonJavaFrames;
     }
 
+
+    public void equalsAndThrow(String thisName, Trace other, String otherName, boolean ignoreNonJavaFrames,
+                               boolean thisMightBeCutOff, boolean otherMightBeCutOff) {
+        List<String> messages = new ArrayList<>();
+        if (!equals(other, ignoreNonJavaFrames, thisMightBeCutOff, otherMightBeCutOff, messages)) {
+            throw new TracesUnequalError(this, thisName, other, otherName, messages);
+        }
+    }
+
     public boolean equals(Trace other, boolean ignoreNonJavaFrames) {
+        return equals(other, ignoreNonJavaFrames, false, false, null);
+    }
+
+    private boolean equals(Trace other, boolean ignoreNonJavaFrames, boolean thisMightBeCutOff,
+                           boolean otherMightBeCutOff, List<String> messagesDest) {
         if (errorCode != other.errorCode) {
             return false;
         }
@@ -125,23 +144,62 @@ public class Trace extends AbstractList<Frame> {
             return false;
         }
         if (ignoreNonJavaFrames) {
-            return withoutNonJavaFrames().frames.equals(other.withoutNonJavaFrames().frames);
+            Trace thisWithout = withoutNonJavaFrames();
+            Trace otherWithout = other.withoutNonJavaFrames();
+            if ((thisWithout.isEmpty() && !this.isEmpty()) || (otherWithout.isEmpty() && !other.isEmpty())) {
+                return true;
+            }
+            return thisWithout.equals(0, otherWithout, 0, thisMightBeCutOff, otherMightBeCutOff, messagesDest);
         }
-        return equalsIgnoringTopNonJavaFrames(other);
+        return equalsIgnoringTopNonJavaFrames(other, thisMightBeCutOff, otherMightBeCutOff, messagesDest);
     }
 
     /**
      * Compare two traces that both have non-java frames, disregarding any differences in the top most non-java frames.
      */
-    private boolean equalsIgnoringTopNonJavaFrames(Trace other) {
+    private boolean equalsIgnoringTopNonJavaFrames(Trace other, boolean thisMightBeCutOff, boolean otherMightBeCutOff
+            , List<String> messagesDest) {
         int firstJavaFrameIndex = topMostJavaFrameIndex();
         int otherFirstJavaFrameIndex = other.topMostJavaFrameIndex();
-        for (int i = firstJavaFrameIndex; i < size(); i++) {
-            if (!get(i).equals(other.get(i - firstJavaFrameIndex + otherFirstJavaFrameIndex))) {
+        return equals(firstJavaFrameIndex, other, otherFirstJavaFrameIndex, thisMightBeCutOff, otherMightBeCutOff,
+                messagesDest);
+    }
+
+    private boolean equals(int thisStart, Trace other, int otherStart, boolean thisMaybeCutOff,
+                           boolean otherMaybeCutOff, List<String> messageDest) {
+        int thisLength = size() - thisStart;
+        int otherLength = other.size() - otherStart;
+        if (thisLength != otherLength) {
+            if (thisMaybeCutOff || otherMaybeCutOff) {
+                if (thisMaybeCutOff && thisLength < otherLength) {
+                    otherLength = thisLength;
+                } else if (otherMaybeCutOff && otherLength < thisLength) {
+                    thisLength = otherLength;
+                } else {
+                    if (messageDest != null) {
+                        messageDest.add("Trace length mismatch: " + thisLength + " != " + otherLength);
+                    }
+                    return false;
+                }
+            } else {
+                if (messageDest != null) {
+                    messageDest.add("Trace length mismatch: " + thisLength + " != " + otherLength);
+                }
                 return false;
             }
         }
-        return true;
+        for (int i = 0; i < thisLength; i++) {
+            var thisFrame = get(thisStart + i);
+            var otherFrame = other.get(otherStart + i);
+            if (!thisFrame.equals(otherFrame)) {
+                if (messageDest != null) {
+                    messageDest.add("Frame mismatch at index %3d: %s != %s".formatted(i, thisFrame, otherFrame));
+                } else {
+                    return false;
+                }
+            }
+        }
+        return messageDest == null || messageDest.isEmpty();
     }
 
     /**
@@ -240,6 +298,35 @@ public class Trace extends AbstractList<Frame> {
                 }
             }
         }
-        return new Trace(kind, newFrames);
+        return new Trace(kind, state, newFrames);
+    }
+
+    /**
+     * two traces don't match
+     */
+    public static class TracesUnequalError extends AssertionError {
+
+        private final Trace a;
+        private final String aName;
+        private final Trace b;
+        private final String bName;
+        private final List<String> messages;
+
+        public TracesUnequalError(Trace a, String aName, Trace b, String bName, List<String> messages) {
+            this.a = a;
+            this.aName = aName;
+            this.b = b;
+            this.bName = bName;
+            this.messages = messages;
+        }
+
+        @Override
+        public String toString() {
+            boolean ignoreNonJavaFrames = !a.hasNonJavaFrames() || !b.hasNonJavaFrames();
+            Trace af = ignoreNonJavaFrames ? a.withoutNonJavaFrames() : a;
+            Trace bf = ignoreNonJavaFrames ? b.withoutNonJavaFrames() : b;
+            return "Traces unequal (%s vs %s)%s:\n".formatted(aName, bName, ignoreNonJavaFrames ? " ignoring non Java" +
+                    " frames" : "") + String.join("\n", messages) + "\n" + af + "\n" + bf;
+        }
     }
 }

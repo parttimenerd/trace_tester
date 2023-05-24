@@ -156,6 +156,7 @@ void primeClasses();
 
 void registerThread(JNIEnv *jni_env, jthread thread) {
   if (!primedClasses) {
+    primedClasses = true;
     primeClasses();
   }
   threadIdMap.addThread(get_thread_id(),
@@ -208,6 +209,10 @@ void primeClasses() {
 }
 
 static void JNICALL OnVMInit(jvmtiEnv *_jvmti, JNIEnv *jni_env, jthread thread) {
+  if (!primedClasses) {
+    primedClasses = true;
+    primeClasses();
+  }
 }
 
 static void signalHandler(int signum, siginfo_t *info, void *ucontext);
@@ -374,6 +379,8 @@ JNIEXPORT jobject JNICALL Java_tester_Tracer_runASGST
   (JNIEnv *env, jclass, jint options, jint depth) {
   ASGST_CallFrame frames[MAX_DEPTH];
   ASGST_CallTrace trace;
+  trace.kind = 0;
+  trace.state = 0;
   trace.frames = frames;
   ucontext_t context;
   getcontext(&context);
@@ -447,6 +454,8 @@ private:
     for (size_t i = 0; i < count; i++) {
       traces[i].frames = framess[i].data();
       traces[i].num_frames = 0;
+      traces[i].kind = 0;
+      traces[i].state = 0;
     }
   }
 

@@ -4,7 +4,9 @@ import tester.util.Triple;
 import tester.util.WhiteBoxUtil.CompilationLevelAndInlining;
 
 import java.lang.reflect.Executable;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.function.Predicate;
 
 public abstract class Frame {
@@ -57,6 +59,8 @@ public abstract class Frame {
         public final String methodName;
         public final String signature;
 
+        private List<String> parameterTypes;
+
         public MethodId(long id, String className, String methodName, String signature) {
             this.id = id;
             this.className = className;
@@ -76,7 +80,48 @@ public abstract class Frame {
 
         @Override
         public String toString() {
-            return className + "." + methodName + signature;
+            return className.substring(1, className.length() - 1) + "." + methodName + signature;
+        }
+
+        private String toShortSignatureString() {
+            List<String> parts = new ArrayList<>();
+            for (String parameterType : getParameterTypes()) {
+                parts.add(parameterType.substring(parameterType.lastIndexOf('/') + 1));
+            }
+            return "(" + String.join("", parts) + ")";
+        }
+
+        public String toShortString() {
+            return className.substring(1, className.length() - 1).replace('/', '.') + "." + methodName + toShortSignatureString();
+        }
+
+        private static List<String> parseParameterTypes(String signature) {
+            List<String> parameterTypes = new ArrayList<>();
+            int i = 1;
+            while (signature.charAt(i) != ')') {
+                int start = i;
+                while (signature.charAt(i) == '[') {
+                    i++;
+                }
+                if (signature.charAt(i) == 'L') {
+                    i = signature.indexOf(';', i) + 1;
+                } else {
+                    i++;
+                }
+                parameterTypes.add(signature.substring(start, i));
+            }
+            return parameterTypes;
+        }
+
+        private List<String> getParameterTypes() {
+            if (parameterTypes == null) {
+                parameterTypes = parseParameterTypes(signature);
+            }
+            return parameterTypes;
+        }
+
+        public int countParameters() {
+            return getParameterTypes().size();
         }
     }
 
@@ -107,7 +152,7 @@ public abstract class Frame {
         /**
          * ASGCT and GST native frame
          */
-        public JavaFrame(int type, MethodId methodId) {
+        private JavaFrame(int type, MethodId methodId) {
             super(type);
             this.compLevel = -2;
             this.bci = -1;
@@ -160,7 +205,8 @@ public abstract class Frame {
 
         @Override
         public String toString() {
-            return "JavaFrame{" + "compLevel=" + compLevel + ", bci=" + bci + ", methodId=" + methodId + (type == JAVA_INLINED ? ", inlined" : "") + '}';
+            String t = isNative() ? ", native" : (type == JAVA_INLINED ? ", inlined" : "");
+            return "Java[" + methodId.toShortString() + t + ", bci=" + bci + ", c" + compLevel + ']';
         }
 
         /**
@@ -205,7 +251,7 @@ public abstract class Frame {
 
         @Override
         public String toString() {
-            return "NonJavaFrame{" + "pc=" + pc + '}';
+            return "Cpp[0x%08x]".formatted(pc);
         }
 
         @Override

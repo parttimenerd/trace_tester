@@ -115,7 +115,7 @@ public class WhiteBoxUtil {
                 lastCompLevel = compLevelFrames.get(i);
             }
         }
-        var res = IntStream.range(0, frames.size()).mapToObj(i -> {
+        return IntStream.range(0, frames.size()).mapToObj(i -> {
             var p = frames.get(i);
             var m = p.getFirst();
             var level = compLevelFrames.get(i);
@@ -125,7 +125,6 @@ public class WhiteBoxUtil {
             }
             return Frame.matchesExecutable(i, m).hasCompilationLevel(level).isNotInlined();
         }).toArray(Pair[]::new);
-        return res;
     }
 
     /**

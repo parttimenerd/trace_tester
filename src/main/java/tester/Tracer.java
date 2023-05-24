@@ -1,10 +1,11 @@
 package tester;
 
+import tester.Trace.TracesUnequalError;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
-import java.util.stream.IntStream;
 
 import static tester.Tracer.Options.*;
 import static tester.util.ListUtils.combine;
@@ -416,45 +417,42 @@ public class Tracer {
     /**
      * trace with the configuration it has been obtained with
      */
-    public record ConfiguredTrace(Configuration config, Trace trace) {
+    public record ConfiguredTrace(Configuration config, Trace trace, int maxDepth) {
         @Override
         public String toString() {
             return config + ":\n" + trace;
         }
 
         public void checkEquality(ConfiguredTrace other) {
-            if (!trace.equals(other.trace, !config.doesIncludeCFrames() || !other.config.doesIncludeCFrames())) {
-                throw new TracesUnequalError(this, other);
+            checkEquality(other, false);
+        }
+
+        /**
+         * @param allowOverApproximation if true, allow the traces to be unequal if one of them has an error and the
+         *                               other doesn't, if one has a more permissive config than the other
+         */
+        public void checkEquality(ConfiguredTrace other, boolean allowOverApproximation) {
+            if (allowOverApproximation && trace.hasError() != other.trace.hasError()) {
+                if (config.doesIncludeCFrames() != other.config.doesIncludeCFrames() &&
+                        config.doesIncludeCFrames() == !trace.hasError()) {
+                    return;
+                }
+                if (config.doesIncludeNonJavaThreads() != other.config.doesIncludeNonJavaThreads() &&
+                        config.doesIncludeNonJavaThreads() == !trace.hasError()) {
+                    return;
+                }
+                if (config.doesIncludeWalkDuringUnsafeStates() != other.config.doesIncludeWalkDuringUnsafeStates() &&
+                        config.doesIncludeWalkDuringUnsafeStates() == !trace.hasError()) {
+                    return;
+                }
             }
-        }
-    }
-
-    /**
-     * two traces don't match
-     */
-    public static class TracesUnequalError extends AssertionError {
-
-        private final ConfiguredTrace a;
-        private final ConfiguredTrace b;
-
-        public TracesUnequalError(ConfiguredTrace a, ConfiguredTrace b) {
-            this.a = a;
-            this.b = b;
+            trace.equalsAndThrow(config.toLongString(), other.trace, other.config.toLongString(),
+                    !config.doesIncludeCFrames() || !other.config.doesIncludeCFrames(), mightBeCutOff(),
+                    other.mightBeCutOff());
         }
 
-        @Override
-        public String toString() {
-            boolean ignoreNonJavaFrames = !a.trace.hasNonJavaFrames() || !b.trace.hasNonJavaFrames();
-            Trace af = ignoreNonJavaFrames ? a.trace.withoutNonJavaFrames() : a.trace;
-            Trace bf = ignoreNonJavaFrames ? b.trace.withoutNonJavaFrames() : b.trace;
-            List<Integer> unequalIndexes =
-                    IntStream.range(0, Math.max(af.size(), bf.size())).filter(i -> i >= af.size() || i >= bf.size() || !af.get(i).equals(bf.get(i))).boxed().toList();
-            List<String> lines = new ArrayList<>();
-            unequalIndexes.forEach(i -> {
-                lines.add("at %d: %s != %s\n".formatted(i, i >= af.size() ? "null" : af.get(i), i >= bf.size() ?
-                        "null" : bf.get(i)));
-            });
-            return "Traces unequal (%s vs %s):\n".formatted(a.config.toLongString(), b.config.toLongString()) + String.join("", lines) + a + "\n" + b;
+        public boolean mightBeCutOff() {
+            return trace.size() == maxDepth;
         }
     }
 
@@ -501,17 +499,21 @@ public class Tracer {
         int asgstSigIndex = 0;
         for (var c : configs) {
             switch (c.mode) {
-                case GST -> confTraces.add(new ConfiguredTrace(c, runGST(c.thread, depth)));
-                case ASGCT -> confTraces.add(new ConfiguredTrace(c, runASGCT(depth)));
-                case ASGCT_SIGNAL_HANDLER -> confTraces.add(new ConfiguredTrace(c, traces[0]));
-                case ASGST -> confTraces.add(new ConfiguredTrace(c, runASGST(c.options, depth)));
-                case ASGST_SEPARATE_THREAD -> confTraces.add(new ConfiguredTrace(c, traces[1 + asgstSepThreadIndex++]));
-                case ASGST_SIGNAL_HANDLER ->
-                        confTraces.add(new ConfiguredTrace(c,
-                                traces[1 + asgstSepThreadOptions.length + asgstSigIndex++]));
+                case GST -> confTraces.add(new ConfiguredTrace(c, runGST(c.thread, depth), depth));
+                case ASGCT -> confTraces.add(new ConfiguredTrace(c, runASGCT(depth), depth));
+                case ASGCT_SIGNAL_HANDLER -> confTraces.add(new ConfiguredTrace(c, traces[0], depth));
+                case ASGST -> confTraces.add(new ConfiguredTrace(c, runASGST(c.options, depth), depth));
+                case ASGST_SEPARATE_THREAD ->
+                        confTraces.add(new ConfiguredTrace(c, traces[1 + asgstSepThreadIndex++], depth));
+                case ASGST_SIGNAL_HANDLER -> confTraces.add(new ConfiguredTrace(c,
+                        traces[1 + asgstSepThreadOptions.length + asgstSigIndex++], depth));
             }
         }
         return confTraces;
+    }
+
+    public List<ConfiguredTrace> runMultiple(Thread thread) {
+        return runMultiple(configurations, thread);
     }
 
     public Trace runMultipleAndCompare() {
@@ -542,16 +544,20 @@ public class Tracer {
     private Trace runAndCompare(List<Configuration> configs, int depth, Thread thread) {
         assert configs != null && configs.size() > 0;
         var confTraces = thread == null || thread.equals(Thread.currentThread()) ?
-                configs.stream().map(config -> new ConfiguredTrace(config, run(config, depth, thread))).toList() :
+                configs.stream().map(config -> new ConfiguredTrace(config, run(config, depth, thread), depth)).toList() :
                 runMultiple(configs, depth, thread);
         return compare(confTraces);
     }
 
     public Trace compare(List<ConfiguredTrace> traces) {
+        return compare(traces, false);
+    }
+
+    public Trace compare(List<ConfiguredTrace> traces, boolean allowOverApproximation) {
         var first = traces.stream().max(Comparator.comparingInt(a -> a.trace.size())).orElseThrow();
         for (var other : traces) {
             if (other != first) {
-                first.checkEquality(other);
+                first.checkEquality(other, allowOverApproximation);
             }
         }
         return first.trace;

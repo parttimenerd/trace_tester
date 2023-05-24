@@ -18,7 +18,7 @@ import static org.testng.AssertJUnit.assertTrue;
  */
 public class BasicNativeAndCTest {
 
-    {
+    static {
         JNIHelper.loadAndAttachIfNeeded();
     }
 
