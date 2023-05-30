@@ -52,6 +52,12 @@ public abstract class Frame {
         return frame.type == type && frame.equals(this);
     }
 
+    public record MethodNameAndClass(String className, String methodName, String signature) {
+        public boolean isSame(MethodId methodId) {
+            return methodId.className.equals(className) && methodId.methodName.equals(methodName) && methodId.signature.equals(signature);
+        }
+    }
+
     public static class MethodId {
 
         public final long id;

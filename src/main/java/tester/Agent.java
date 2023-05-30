@@ -22,22 +22,22 @@ public class Agent implements Runnable {
     }
 
     @Option(names = "--gst", description = "compare with GetStackTrace, triggers safe-points")
-    private final boolean compareWithGST = false;
+    private boolean compareWithGST = false;
 
     /**
      * only include the in signal handler versions with no C frames
      */
     @Option(names = "--basic", description = "only include the in signal handler versions with no C frames")
-    private final boolean basic = false;
+    private boolean basic = false;
 
     @Option(names = "--max-threads", description = "maximum number of threads to walk per iteration")
-    private final int maxThreadsPerIteration = 10;
+    private int maxThreadsPerIteration = 10;
 
     @Option(names = {"--sample-interval", "-i"}, description = "sample interval in seconds")
-    private final float sampleInterval = 0.001f;
+    private float sampleInterval = 0.001f;
 
     @Option(names = {"--depth", "-d"}, description = "maximum depth of the stack trace")
-    private final int depth = 1024;
+    private int depth = 1024;
 
 
     private List<Thread> selectThreads() {

@@ -153,27 +153,27 @@ public class Tracer {
             return new Configuration(mode, options, thread);
         }
 
-        static Configuration gst() {
+        public static Configuration gst() {
             return new Configuration(Mode.GST);
         }
 
-        static Configuration asgct() {
+        public static Configuration asgct() {
             return new Configuration(Mode.ASGCT);
         }
 
-        static Configuration asgctSignalHandler() {
+        public static Configuration asgctSignalHandler() {
             return new Configuration(Mode.ASGCT_SIGNAL_HANDLER);
         }
 
-        static Configuration asgst() {
+        public static Configuration asgst() {
             return new Configuration(Mode.ASGST);
         }
 
-        static Configuration asgstSignalHandler() {
+        public static Configuration asgstSignalHandler() {
             return new Configuration(Mode.ASGST_SIGNAL_HANDLER);
         }
 
-        static Configuration asgstSeparateThread() {
+        public static Configuration asgstSeparateThread() {
             return new Configuration(Mode.ASGST_SEPARATE_THREAD);
         }
 
@@ -254,6 +254,10 @@ public class Tracer {
 
     public Tracer(Configuration... configs) {
         this(List.of(configs));
+    }
+
+    public boolean hasASGCTSignalConfiguration() {
+        return configurations.stream().anyMatch(c -> c.mode == Mode.ASGCT_SIGNAL_HANDLER);
     }
 
     /**
@@ -432,6 +436,11 @@ public class Tracer {
          *                               other doesn't, if one has a more permissive config than the other
          */
         public void checkEquality(ConfiguredTrace other, boolean allowOverApproximation) {
+            if (allowOverApproximation && trace.hasError() && other.trace.hasError()) {
+                if (trace.getError() != other.trace.getError()) {
+
+                }
+            }
             if (allowOverApproximation && trace.hasError() != other.trace.hasError()) {
                 if (config.doesIncludeCFrames() != other.config.doesIncludeCFrames() &&
                         config.doesIncludeCFrames() == !trace.hasError()) {

@@ -1,14 +1,14 @@
 package tester;
 
 import tester.Frame.JavaFrame;
+import tester.Frame.MethodNameAndClass;
 import tester.util.Pair;
 import tester.util.Triple;
 
-import java.util.AbstractList;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 public class Trace extends AbstractList<Frame> {
@@ -41,7 +41,7 @@ public class Trace extends AbstractList<Frame> {
         this.kind = kind;
         this.state = state;
         this.frames = frames;
-        this.errorCode = 0;
+        this.errorCode = 1;
     }
 
     public Trace(int kind, int state, int errorCode) {
@@ -52,7 +52,7 @@ public class Trace extends AbstractList<Frame> {
     }
 
     public boolean hasError() {
-        return errorCode < 0;
+        return errorCode <= 0;
     }
 
     public boolean isValid() {
@@ -127,7 +127,7 @@ public class Trace extends AbstractList<Frame> {
                                boolean thisMightBeCutOff, boolean otherMightBeCutOff) {
         List<String> messages = new ArrayList<>();
         if (!equals(other, ignoreNonJavaFrames, thisMightBeCutOff, otherMightBeCutOff, messages)) {
-            throw new TracesUnequalError(this, thisName, other, otherName, messages);
+            throw new TracesUnequalError(this, thisName + (thisMightBeCutOff ? " cut off" : ""), other, otherName + (otherMightBeCutOff ? " cut off" : ""), messages);
         }
     }
 
@@ -138,9 +138,15 @@ public class Trace extends AbstractList<Frame> {
     private boolean equals(Trace other, boolean ignoreNonJavaFrames, boolean thisMightBeCutOff,
                            boolean otherMightBeCutOff, List<String> messagesDest) {
         if (errorCode != other.errorCode) {
+            if (messagesDest != null) {
+                messagesDest.add("Error code mismatch: %d != %d".formatted(errorCode, other.errorCode));
+            }
             return false;
         }
         if (kind != other.kind) {
+            if (messagesDest != null) {
+                messagesDest.add("Kind mismatch: %d != %d".formatted(kind, other.kind));
+            }
             return false;
         }
         if (ignoreNonJavaFrames) {
@@ -299,6 +305,28 @@ public class Trace extends AbstractList<Frame> {
             }
         }
         return new Trace(kind, state, newFrames);
+    }
+
+    /** 1 for non error */
+    public int getError() {
+        return errorCode;
+    }
+
+    public boolean hasBottomMethod(List<MethodNameAndClass> allowedBottomMethods) {
+        if (hasError() || frames.isEmpty()) {
+            return false;
+        }
+        return get(-1) instanceof JavaFrame javaFrame && allowedBottomMethods.stream().anyMatch(m -> m.isSame(javaFrame.methodId));
+    }
+
+    public Optional<Frame> bottomJavaFrame() {
+        for (int i = frames.size() - 1; i >= 0; i--) {
+            Frame frame = frames.get(i);
+            if (frame instanceof JavaFrame) {
+                return Optional.of(frame);
+            }
+        }
+        return Optional.empty();
     }
 
     /**

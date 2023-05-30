@@ -35,6 +35,10 @@ public class WhiteBoxUtil {
         }
     }
 
+    public static boolean checkCompilationLevels(List<Pair<Executable, CompilationLevelAndInlining>> list, List<Pair<Executable, CompilationLevelAndInlining>> levels) {
+        return true;
+    }
+
     public record CompilationLevelAndInlining(int level, boolean inline) {
 
         public static CompilationLevelAndInlining of(int level, boolean inline) {
@@ -55,6 +59,10 @@ public class WhiteBoxUtil {
     }
 
     public static void forceCompilationLevels(Map<Executable, CompilationLevelAndInlining> levels) {
+        forceCompilationLevels(levels, Integer.MAX_VALUE);
+    }
+
+    public static void forceCompilationLevels(Map<Executable, CompilationLevelAndInlining> levels, int maxSecondsToWait) {
         WhiteBox wb = WhiteBox.getWhiteBox();
         reset(levels.keySet());
         List<Executable> inlinedMethods = new ArrayList<>();
@@ -87,7 +95,8 @@ public class WhiteBoxUtil {
                 wb.testSetDontInlineMethod(m, false);
             }
         });
-        while (levels.entrySet().stream().anyMatch(e -> !e.getValue().inline && wb.getMethodCompilationLevel(e.getKey()) != e.getValue().level())) {
+        long start = System.currentTimeMillis();
+        while (levels.entrySet().stream().anyMatch(e -> !e.getValue().inline && wb.getMethodCompilationLevel(e.getKey()) != e.getValue().level()) && System.currentTimeMillis() - start < maxSecondsToWait * 1000L) {
             try {
                 Thread.sleep(1);
             } catch (InterruptedException e) {
@@ -97,7 +106,11 @@ public class WhiteBoxUtil {
     }
 
     public static void forceCompilationLevels(List<Pair<Executable, CompilationLevelAndInlining>> levels) {
-        forceCompilationLevels(levels.stream().collect(Pair.toMap()));
+        forceCompilationLevels(levels, Integer.MAX_VALUE);
+    }
+
+    public static void forceCompilationLevels(List<Pair<Executable, CompilationLevelAndInlining>> levels, int maxSecondsToWait) {
+        forceCompilationLevels(levels.stream().collect(Pair.toMap()), maxSecondsToWait);
     }
 
     @SuppressWarnings("unchecked")
@@ -171,5 +184,23 @@ public class WhiteBoxUtil {
             }
             return new Pair<>(m, new CompilationLevelAndInlining(level, inlining));
         });
+    }
+
+    /** Create random compilation levels, but look at methods out of their context */
+    public static List<Pair<Executable, CompilationLevelAndInlining>> createRandomCompilationLevels(Random random,
+                                                                                                    Collection<Executable> methods, double interpretedProbability, double inliningProbability) {
+        return methods.stream().map(m -> {
+            int level;
+            boolean inlining = false;
+            if (random.nextDouble() < interpretedProbability) { // 1/3 of the time, interpret
+                level = CompilationLevel.COMP_LEVEL_NONE;
+            } else {
+                int low = CompilationLevel.COMP_LEVEL_NONE + 1;
+                level = Math.min(CompilationLevel.COMP_LEVEL_MAX,
+                        (int) (random.nextDouble() * (CompilationLevel.COMP_LEVEL_MAX + 1 - low)) + low);
+                inlining = random.nextDouble() < inliningProbability;
+            }
+            return new Pair<>(m, new CompilationLevelAndInlining(level, inlining));
+        }).collect(Collectors.toList());
     }
 }
